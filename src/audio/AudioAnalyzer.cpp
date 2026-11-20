@@ -176,6 +176,39 @@ void AudioAnalyzer::UpdateWaveform(const float* samples, float sampleRate, float
     }
 }
 
+void AudioAnalyzer::UpdateScope(const float* mono, const float* side, size_t count, float sampleRate, float dt) {
+    constexpr int kPoints = AudioFeatures::kScopePoints;
+    if (count < 2 * static_cast<size_t>(kPoints) || sampleRate <= 0.0f) return;
+    const int n = static_cast<int>(count);
+    const int span = std::clamp(static_cast<int>(sampleRate * 0.025f), kPoints, n / 2);
+
+    // Trigger on a rising zero crossing (like a real scope) so steady waveforms stand still.
+    int start = n - span;
+    for (int i = n - span - 1; i > n - 2 * span && i > 0; --i) {
+        if (mono[i - 1] < 0.0f && mono[i] >= 0.0f) { start = i; break; }
+    }
+
+    // Box-filter down to kPoints (no aliasing), tracking the peak for auto-scaling.
+    float peak = 0.0f;
+    float mid[kPoints], sid[kPoints];
+    const float per = static_cast<float>(span) / kPoints;
+    for (int p = 0; p < kPoints; ++p) {
+        const int a = start + static_cast<int>(p * per);
+        const int b = std::max(a + 1, start + static_cast<int>((p + 1) * per));
+        float sm = 0.0f, ss = 0.0f;
+        for (int i = a; i < b; ++i) { sm += mono[i]; ss += side[i]; }
+        mid[p] = sm / (b - a);
+        sid[p] = ss / (b - a);
+        peak = std::max(peak, std::fabs(mid[p]) + std::fabs(sid[p]));
+    }
+    m_scopePeak = std::max({ peak, m_scopePeak * std::exp(-dt / 1.5f), 2e-3f });
+    const float scale = 0.9f / m_scopePeak;
+    for (int p = 0; p < kPoints; ++p) {
+        m_features.scopeMid[p] = mid[p] * scale;
+        m_features.scopeSide[p] = sid[p] * scale;
+    }
+}
+
 void AudioAnalyzer::UpdateStructure(float bassPower, float highPower, float totalPower, float dt) {
     AudioFeatures& f = m_features;
     const float bassDb = ToDb(bassPower), highDb = ToDb(highPower), levelDb = ToDb(totalPower);

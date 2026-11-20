@@ -18,6 +18,9 @@ public:
     void ProcessStream(const float* samples, size_t count, float sampleRate);
     // 2. Then the latest kFftSize samples, oldest first. newData: false if nothing arrived.
     void Update(const float* samples, float sampleRate, bool newData, float dt);
+    // 3. Optionally, a recent stereo window (mono + side, oldest first, count >= 2 * 25 ms)
+    //    for the oscilloscope data.
+    void UpdateScope(const float* mono, const float* side, size_t count, float sampleRate, float dt);
 
     const AudioFeatures& Features() const { return m_features; }
     const BeatTracker::State& TrackerState() const { return m_beats.GetState(); }   // diagnostics
@@ -48,6 +51,7 @@ private:
     float m_fluxMean = 0, m_fluxVar = 0;
     float m_timeSinceBeat = 10.0f;
     float m_wavePeak = 0.01f;
+    float m_scopePeak = 0.01f;
 
     // Structure detection (raw dB, before auto-gain)
     bool m_structureInit = false;

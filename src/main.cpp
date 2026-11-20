@@ -11,6 +11,7 @@
 #include "viz/feedback/FeedbackVisualizer.h"
 #include "viz/nebula/NebulaVisualizer.h"
 #include "viz/neongrid/NeonGridVisualizer.h"
+#include "viz/scope/ScopeVisualizer.h"
 #include "viz/spectrum/SpectrumVisualizer.h"
 
 #include <algorithm>
@@ -28,6 +29,7 @@ void RegisterVisualizers(VisualizerHost& host) {
     host.Add(std::make_unique<NebulaVisualizer>());
     host.Add(std::make_unique<NeonGridVisualizer>());
     host.Add(std::make_unique<FeedbackVisualizer>());
+    host.Add(std::make_unique<ScopeVisualizer>());
     host.Add(std::make_unique<SpectrumVisualizer>());
 }
 
@@ -99,6 +101,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     float samples[AudioAnalyzer::kFftSize];
     constexpr size_t kStreamChunk = AudioCapture::kRingSize / 2;
     auto streamChunk = std::make_unique<float[]>(kStreamChunk);
+    constexpr size_t kScopeWindow = 6144;   // > 2 x 25 ms even at 96 kHz (for the scope's trigger search)
+    auto scopeMono = std::make_unique<float[]>(kScopeWindow);
+    auto scopeSide = std::make_unique<float[]>(kScopeWindow);
     uint64_t lastSampleCount = 0;
     capture->SetPreferredDevice(settings.audioDevice);
     capture->Start();
@@ -241,6 +246,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         }
         capture->GetLatest(samples, AudioAnalyzer::kFftSize);
         analyzer->Update(samples, static_cast<float>(capture->SampleRate()), sampleCount != lastSampleCount, dt);
+        capture->GetLatestStereo(scopeMono.get(), scopeSide.get(), kScopeWindow);
+        analyzer->UpdateScope(scopeMono.get(), scopeSide.get(), kScopeWindow, static_cast<float>(capture->SampleRate()), dt);
         lastSampleCount = sampleCount;
         const AudioFeatures& audio = analyzer->Features();
 

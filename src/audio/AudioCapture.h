@@ -32,6 +32,9 @@ public:
 
     // Copies the most recent `count` mono samples, oldest first (count <= kRingSize / 2).
     void GetLatest(float* out, size_t count) const;
+    // The latest `count` mono and stereo "side" ((L - R) / 2) samples, from one consistent
+    // snapshot: left = mono + side, right = mono - side.
+    void GetLatestStereo(float* mono, float* side, size_t count) const;
     uint32_t SampleRate() const { return m_sampleRate.load(std::memory_order_relaxed); }
     uint64_t TotalSamples() const { return m_written.load(std::memory_order_acquire); }
     std::wstring DeviceName() const;   // friendly name of the device being captured
@@ -48,12 +51,13 @@ private:
     void ThreadMain();
     bool RunSession();   // returns true to retry immediately (device changed), false to back off
     bool ResolveDevice(IMMDeviceEnumerator* enumerator, Microsoft::WRL::ComPtr<IMMDevice>& device, std::wstring& id);
-    void Write(const float* samples, size_t count);
+    void Write(const float* samples, const float* side, size_t count);
     void WriteSilence(size_t count);
 
     std::thread m_thread;
     HANDLE m_stopEvent = nullptr;
-    float m_ring[kRingSize] = {};
+    float m_ring[kRingSize] = {};   // mono
+    float m_side[kRingSize] = {};   // (L - R) / 2
     std::atomic<uint64_t> m_written{ 0 };
     std::atomic<uint32_t> m_sampleRate{ 48000 };
     mutable std::mutex m_nameMutex;   // guards the two strings below

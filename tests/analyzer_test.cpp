@@ -293,6 +293,38 @@ int main() {
         Check(std::fabs(r.last.waveform[0]) < 0.2f && r.last.waveform[1] > r.last.waveform[0], "starts on a rising zero crossing");
     }
 
+    std::printf("Oscilloscope data\n");
+    {
+        constexpr size_t n = 6144;
+        std::vector<float> mono(n), side(n);
+        auto analyzer = std::make_unique<AudioAnalyzer>();
+
+        // Mono 200 Hz sine: triggered on a rising zero crossing, scaled to about +-0.9.
+        for (size_t i = 0; i < n; ++i) { mono[i] = 0.3f * std::sin(2.0f * kPi * 200.0f * i / kRate + 1.0f); side[i] = 0.0f; }
+        for (int k = 0; k < 10; ++k) analyzer->UpdateScope(mono.data(), side.data(), n, kRate, 1.0f / kFps);
+        const AudioFeatures& f = analyzer->Features();
+        float lo = 1, hi = -1;
+        for (float v : f.scopeMid) { lo = std::fmin(lo, v); hi = std::fmax(hi, v); }
+        std::printf("    sine: first points %.2f %.2f, range %.2f..%.2f\n", f.scopeMid[0], f.scopeMid[1], lo, hi);
+        Check(std::fabs(f.scopeMid[0]) < 0.1f && f.scopeMid[1] > f.scopeMid[0], "triggers on a rising zero crossing");
+        Check(hi > 0.8f && hi < 0.95f && lo < -0.8f, "auto-scaled to about +-0.9");
+
+        // Left = sine, right = cosine: the X/Y (mid/side) trace is a circle.
+        for (size_t i = 0; i < n; ++i) {
+            const float l = 0.4f * std::sin(2.0f * kPi * 300.0f * i / kRate), r = 0.4f * std::cos(2.0f * kPi * 300.0f * i / kRate);
+            mono[i] = 0.5f * (l + r);
+            side[i] = 0.5f * (l - r);
+        }
+        for (int k = 0; k < 10; ++k) analyzer->UpdateScope(mono.data(), side.data(), n, kRate, 1.0f / kFps);
+        float rMin = 9, rMax = 0;
+        for (int p = 0; p < AudioFeatures::kScopePoints; ++p) {
+            const float rr = std::sqrt(f.scopeMid[p] * f.scopeMid[p] + f.scopeSide[p] * f.scopeSide[p]);
+            rMin = std::fmin(rMin, rr); rMax = std::fmax(rMax, rr);
+        }
+        std::printf("    stereo sine/cosine: X/Y radius %.3f..%.3f\n", rMin, rMax);
+        Check(rMax > 0.3f && rMin > 0.97f * rMax, "X/Y trace is a circle");
+    }
+
     std::printf("Album-art palette\n");
     {
         constexpr int n = 48;

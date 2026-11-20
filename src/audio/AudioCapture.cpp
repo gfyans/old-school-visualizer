@@ -34,23 +34,24 @@ SampleFormat DetectFormat(const WAVEFORMATEX* wf) {
     return SampleFormat::Unsupported;
 }
 
-// One interleaved frame -> one mono sample (average of channels).
-float ReadMono(const BYTE* frame, SampleFormat fmt, int channels, int bytesPerSample) {
-    float sum = 0.0f;
-    for (int c = 0; c < channels; ++c) {
-        const BYTE* p = frame + c * bytesPerSample;
-        switch (fmt) {
-        case SampleFormat::Float32: { float v; memcpy(&v, p, 4); sum += v; break; }
-        case SampleFormat::Int16: { int16_t v; memcpy(&v, p, 2); sum += v / 32768.0f; break; }
-        case SampleFormat::Int24: {
-            int32_t v = (int32_t(p[0]) << 8) | (int32_t(p[1]) << 16) | (int32_t(p[2]) << 24);
-            sum += (v >> 8) / 8388608.0f;
-            break;
-        }
-        case SampleFormat::Int32: { int32_t v; memcpy(&v, p, 4); sum += v / 2147483648.0f; break; }
-        default: break;
-        }
+float ReadSample(const BYTE* p, SampleFormat fmt) {
+    switch (fmt) {
+    case SampleFormat::Float32: { float v; memcpy(&v, p, 4); return v; }
+    case SampleFormat::Int16: { int16_t v; memcpy(&v, p, 2); return v / 32768.0f; }
+    case SampleFormat::Int24: {
+        int32_t v = (int32_t(p[0]) << 8) | (int32_t(p[1]) << 16) | (int32_t(p[2]) << 24);
+        return (v >> 8) / 8388608.0f;
     }
+    case SampleFormat::Int32: { int32_t v; memcpy(&v, p, 4); return v / 2147483648.0f; }
+    default: return 0.0f;
+    }
+}
+
+// One interleaved frame -> mono (average of all channels) and side ((front L - front R) / 2).
+float ReadFrame(const BYTE* frame, SampleFormat fmt, int channels, int bytesPerSample, float& side) {
+    float sum = 0.0f;
+    for (int c = 0; c < channels; ++c) sum += ReadSample(frame + c * bytesPerSample, fmt);
+    side = channels >= 2 ? 0.5f * (ReadSample(frame, fmt) - ReadSample(frame + bytesPerSample, fmt)) : 0.0f;
     return sum / float(channels);
 }
 
@@ -106,16 +107,31 @@ void AudioCapture::GetLatest(float* out, size_t count) const {
         out[i] = m_ring[(start + i) & (kRingSize - 1)];
 }
 
-void AudioCapture::Write(const float* samples, size_t count) {
+void AudioCapture::GetLatestStereo(float* mono, float* side, size_t count) const {
+    const uint64_t end = m_written.load(std::memory_order_acquire);   // one snapshot: both windows align
+    const uint64_t start = end - count;
+    for (size_t i = 0; i < count; ++i) {
+        mono[i] = m_ring[(start + i) & (kRingSize - 1)];
+        side[i] = m_side[(start + i) & (kRingSize - 1)];
+    }
+}
+
+void AudioCapture::Write(const float* samples, const float* side, size_t count) {
     uint64_t w = m_written.load(std::memory_order_relaxed);
-    for (size_t i = 0; i < count; ++i) m_ring[(w + i) & (kRingSize - 1)] = samples[i];
+    for (size_t i = 0; i < count; ++i) {
+        m_ring[(w + i) & (kRingSize - 1)] = samples[i];
+        m_side[(w + i) & (kRingSize - 1)] = side[i];
+    }
     m_written.store(w + count, std::memory_order_release);
 }
 
 void AudioCapture::WriteSilence(size_t count) {
     count = std::min(count, kRingSize);
     uint64_t w = m_written.load(std::memory_order_relaxed);
-    for (size_t i = 0; i < count; ++i) m_ring[(w + i) & (kRingSize - 1)] = 0.0f;
+    for (size_t i = 0; i < count; ++i) {
+        m_ring[(w + i) & (kRingSize - 1)] = 0.0f;
+        m_side[(w + i) & (kRingSize - 1)] = 0.0f;
+    }
     m_written.store(w + count, std::memory_order_release);
 }
 
@@ -237,7 +253,7 @@ bool AudioCapture::RunSession() {
     QueryPerformanceCounter(&lastWrite);
     lastDeviceCheck = lastWrite;
 
-    std::vector<float> mono;
+    std::vector<float> mono, side;
     bool retryNow = false;
     HANDLE waits[2] = { m_stopEvent, audioEvent };
 
@@ -257,9 +273,10 @@ bool AudioCapture::RunSession() {
                 WriteSilence(frames);
             } else {
                 mono.resize(frames);
+                side.resize(frames);
                 for (UINT32 i = 0; i < frames; ++i)
-                    mono[i] = ReadMono(data + size_t(i) * blockAlign, sampleFormat, channels, bytesPerSample);
-                Write(mono.data(), frames);
+                    mono[i] = ReadFrame(data + size_t(i) * blockAlign, sampleFormat, channels, bytesPerSample, side[i]);
+                Write(mono.data(), side.data(), frames);
             }
             capture->ReleaseBuffer(frames);
             gotData = true;

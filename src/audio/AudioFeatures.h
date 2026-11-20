@@ -6,6 +6,7 @@
 struct AudioFeatures {
     static constexpr int kSpectrumBands = 64;
     static constexpr int kWaveformPoints = 128;
+    static constexpr int kScopePoints = 1024;
 
     // --- Levels ---
     float bass = 0;        //   20 –  250 Hz
@@ -35,4 +36,9 @@ struct AudioFeatures {
 
     float spectrum[kSpectrumBands] = {};      // log-spaced 30 Hz – 16 kHz
     float waveform[kWaveformPoints] = {};     // ~20 ms, -1..1, triggered on a rising zero crossing
+
+    // Oscilloscope data: 25 ms of stereo audio, triggered, auto-scaled to about -1..1.
+    // left = scopeMid + scopeSide, right = scopeMid - scopeSide.
+    float scopeMid[kScopePoints] = {};
+    float scopeSide[kScopePoints] = {};
 };
