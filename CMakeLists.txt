@@ -41,11 +41,14 @@ compile_shader(composite_ps.hlsl  ps_5_0 g_composite_ps)
 compile_shader(spectrum_ps.hlsl   ps_5_0 g_spectrum_ps)
 compile_shader(nebula_ps.hlsl     ps_5_0 g_nebula_ps)
 compile_shader(noise3d_cs.hlsl    cs_5_0 g_noise3d_cs)
+compile_shader(eqbars_ps.hlsl     ps_5_0 g_eqbars_ps)
+compile_shader(feedback_warp_ps.hlsl ps_5_0 g_feedback_warp_ps)
+compile_shader(feedback_out_ps.hlsl  ps_5_0 g_feedback_out_ps)
 
 # ---------------------------------------------------------------------------
 # Audio analysis (pure C++, shared with tests)
 # ---------------------------------------------------------------------------
-add_library(audio_analysis STATIC src/audio/AudioAnalyzer.cpp)
+add_library(audio_analysis STATIC src/audio/AudioAnalyzer.cpp src/audio/BeatTracker.cpp src/media/TrackPalette.cpp)
 target_include_directories(audio_analysis PUBLIC src)
 target_compile_definitions(audio_analysis PRIVATE ${COMMON_DEFS})
 target_compile_options(audio_analysis PRIVATE ${COMMON_OPTS})
@@ -62,15 +65,19 @@ add_executable(Visualizer WIN32
     src/render/GpuTimer.cpp
     src/audio/AudioCapture.cpp
     src/ui/Overlay.cpp
+    src/ui/EqBars.cpp
     src/viz/VisualizerHost.cpp
     src/viz/spectrum/SpectrumVisualizer.cpp
     src/viz/nebula/NebulaVisualizer.cpp
+    src/viz/feedback/FeedbackVisualizer.cpp
+    src/media/NowPlaying.cpp
     res/app.rc
     ${SHADER_HEADERS})
 set_source_files_properties(res/app.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/res/app.ico)
 
 target_include_directories(Visualizer PRIVATE src ${SHADER_OUT})
-target_link_libraries(Visualizer PRIVATE audio_analysis d3d11 dxgi d2d1 dwrite ole32 shell32)
+target_link_libraries(Visualizer PRIVATE audio_analysis d3d11 dxgi d2d1 dwrite ole32 shell32 windowsapp)
+set_source_files_properties(src/media/NowPlaying.cpp PROPERTIES COMPILE_OPTIONS /bigobj)   # C++/WinRT
 target_compile_definitions(Visualizer PRIVATE ${COMMON_DEFS})
 target_compile_options(Visualizer PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_OPTS}>)
 target_link_options(Visualizer PRIVATE ${COMMON_LINK})

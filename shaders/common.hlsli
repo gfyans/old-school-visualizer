@@ -16,12 +16,27 @@ cbuffer Audio : register(b1) {
     float aBeat;          // 1 on beat, decays
     float aBeatCount;     // increments every beat
     float4 aSpectrum[16]; // 64 log-spaced bands, 30 Hz - 16 kHz
+    float4 aTempo;        // x bpm (0 = unknown), y beat phase 0..1, z bar phase 0..1, w confidence
+    float4 aStructure;    // x build-up 0..1, y drop pulse, z grid beat count, w drop count
+    float4 aWaveform[32]; // 128 points, -1..1, oscilloscope-triggered
 };
 
-float Spectrum(int band) {
-    float4 v = aSpectrum[band >> 2];
-    int c = band & 3;
-    return c == 0 ? v.x : c == 1 ? v.y : c == 2 ? v.z : v.w;
+float Pick(float4 v, int c) { return c == 0 ? v.x : c == 1 ? v.y : c == 2 ? v.z : v.w; }
+float Spectrum(int band) { return Pick(aSpectrum[band >> 2], band & 3); }
+float Waveform(int i) { return Pick(aWaveform[i >> 2], i & 3); }
+
+// Smoothly interpolated spectrum at x in [0,1] (low -> high frequency).
+float SpectrumAt(float x) {
+    float f = saturate(x) * 63.0;
+    int i = (int)f;
+    return lerp(Spectrum(i), Spectrum(min(i + 1, 63)), f - i);
+}
+
+// Smoothly interpolated waveform at x in [0,1].
+float WaveformAt(float x) {
+    float f = saturate(x) * 127.0;
+    int i = (int)f;
+    return lerp(Waveform(i), Waveform(min(i + 1, 127)), f - i);
 }
 
 struct VSOut {

@@ -4,6 +4,8 @@
 #include <string>
 #include "audio/AudioFeatures.h"
 
+#include "media/TrackPalette.h"
+
 class Renderer;
 
 // The plug-in contract. To add a visualiser: implement this, then register it in
@@ -41,4 +43,15 @@ public:
 
     // Optional status line for the F1 stats overlay.
     virtual std::wstring Status() const { return {}; }
+
+    // Album-art colours for the current track (nullptr = none / disabled). newTrack is true
+    // when the song changed, a natural moment for a new look.
+    virtual void SetTrackPalette(const TrackPalette* /*palette*/, bool /*newTrack*/) {}
+
+    // Two colours (display RGB 0..1) summing up the current look; used to tint shared
+    // overlays like the equaliser bars. Default: cool blue -> pink.
+    virtual void AccentColours(float lo[3], float hi[3]) const {
+        lo[0] = 0.15f; lo[1] = 0.45f; lo[2] = 1.0f;
+        hi[0] = 1.0f;  hi[1] = 0.3f;  hi[2] = 0.7f;
+    }
 };

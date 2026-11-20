@@ -5,7 +5,6 @@
 
 namespace {
 
-constexpr float kPi = 3.14159265358979f;
 constexpr float kMinFreq = 30.0f, kMaxFreq = 16000.0f;
 constexpr float kRangeDb = 45.0f;      // dynamic range shown below the auto-gain reference
 constexpr float kFloorDb = -50.0f;     // auto-gain never boosts beyond this (keeps silence dark)
@@ -16,20 +15,13 @@ float Smooth(float current, float target, float dt, float attack, float release)
     return target + (current - target) * std::exp(-dt / tau);
 }
 
+float ToDb(float power) { return 10.0f * std::log10(power + 1e-12f); }
+
 } // namespace
 
 AudioAnalyzer::AudioAnalyzer() {
-    for (int i = 0; i < kFftSize; ++i)
-        m_window[i] = 0.5f - 0.5f * std::cos(2.0f * kPi * i / (kFftSize - 1));   // Hann
-    for (int k = 0; k < kFftSize / 2; ++k)
-        m_twiddle[k] = std::polar(1.0f, -2.0f * kPi * k / kFftSize);
-    int bits = 0;
-    while ((1 << bits) < kFftSize) ++bits;
-    for (int i = 0; i < kFftSize; ++i) {
-        int r = 0;
-        for (int b = 0; b < bits; ++b) r |= ((i >> b) & 1) << (bits - 1 - b);
-        m_bitReverse[i] = r;
-    }
+    const std::vector<float> hann = Fft::Hann(kFftSize);
+    std::copy(hann.begin(), hann.end(), m_window);
 }
 
 void AudioAnalyzer::ConfigureBands(float sampleRate) {
@@ -47,24 +39,17 @@ void AudioAnalyzer::ConfigureBands(float sampleRate) {
         // Music has far more energy in the bass; tilt +3 dB/octave around 1 kHz so bars look even.
         m_bandTilt[b] = 3.0f * std::log2(m_bandCenter[b] / 1000.0f);
     }
-    // Beat detection looks at onsets in the kick-drum range.
+    // Onset beats look at the kick-drum range.
     m_fluxLo = std::max(1, int(40.0f / binHz));
     m_fluxHi = std::max(m_fluxLo + 1, int(180.0f / binHz) + 1);
+    // Structure detection: bass (to 200 Hz) and the "riser" range (2–12 kHz).
+    m_bassBinHi = std::max(2, int(200.0f / binHz));
+    m_highBinLo = std::max(1, int(2000.0f / binHz));
+    m_highBinHi = std::min(kBins, std::max(m_highBinLo + 1, int(12000.0f / binHz)));
 }
 
-void AudioAnalyzer::Fft() {
-    for (int i = 0; i < kFftSize; ++i)
-        if (i < m_bitReverse[i]) std::swap(m_fft[i], m_fft[m_bitReverse[i]]);
-    for (int len = 2; len <= kFftSize; len <<= 1) {
-        const int half = len >> 1, step = kFftSize / len;
-        for (int i = 0; i < kFftSize; i += len) {
-            for (int j = 0; j < half; ++j) {
-                const std::complex<float> v = m_fft[i + j + half] * m_twiddle[j * step];
-                m_fft[i + j + half] = m_fft[i + j] - v;
-                m_fft[i + j] += v;
-            }
-        }
-    }
+void AudioAnalyzer::ProcessStream(const float* samples, size_t count, float sampleRate) {
+    m_beats.Process(samples, count, sampleRate);
 }
 
 void AudioAnalyzer::Update(const float* samples, float sampleRate, bool newData, float dt) {
@@ -79,7 +64,7 @@ void AudioAnalyzer::Update(const float* samples, float sampleRate, bool newData,
         m_fft[i] = { samples[i] * m_window[i], 0.0f };
     }
     const float rms = float(std::sqrt(sumSq / kFftSize));
-    Fft();
+    m_fftEngine.Transform(m_fft);
 
     const float norm = 4.0f / kFftSize;   // full-scale sine -> magnitude 1 with a Hann window
     for (int k = 0; k < kBins; ++k) m_power[k] = std::norm(m_fft[k]) * norm * norm;
@@ -90,7 +75,7 @@ void AudioAnalyzer::Update(const float* samples, float sampleRate, bool newData,
         double p = 0.0;
         for (int k = m_bandLo[b]; k < m_bandHi[b]; ++k) p += m_power[k];
         p /= (m_bandHi[b] - m_bandLo[b]);
-        bandDb[b] = 10.0f * std::log10(float(p) + 1e-12f) + m_bandTilt[b];
+        bandDb[b] = ToDb(float(p)) + m_bandTilt[b];
         peakDb = std::max(peakDb, bandDb[b]);
     }
 
@@ -122,7 +107,7 @@ void AudioAnalyzer::Update(const float* samples, float sampleRate, bool newData,
     f.intensity = Smooth(f.intensity, rawLevel, dt, 5.0f, 5.0f);
     f.silent = rms < 1e-4f;   // about -80 dBFS
 
-    // --- Beat detection: spectral flux in the kick range vs adaptive threshold ---
+    // --- Onset beats: spectral flux in the kick range vs adaptive threshold ---
     m_timeSinceBeat += dt;
     f.beat *= std::exp(-dt / 0.12f);
     if (newData) {
@@ -146,4 +131,104 @@ void AudioAnalyzer::Update(const float* samples, float sampleRate, bool newData,
         m_fluxMean += a * d;
         m_fluxVar += a * (d * d - m_fluxVar);
     }
+
+    // --- Beat grid ---
+    const BeatTracker::State& grid = m_beats.GetState();
+    f.bpm = grid.bpm;
+    f.beatPhase = grid.beatPhase;
+    f.barPhase = grid.barPhase;
+    f.gridBeat = grid.beatIndex;
+    f.tempoConfidence = f.silent ? 0.0f : grid.confidence;
+
+    // --- Structure & waveform ---
+    double bassP = 0, highP = 0, totalP = 0;
+    for (int k = 1; k < m_bassBinHi; ++k) bassP += m_power[k];
+    for (int k = m_highBinLo; k < m_highBinHi; ++k) highP += m_power[k];
+    for (int k = 1; k < kBins; ++k) totalP += m_power[k];
+    UpdateStructure(float(bassP), float(highP), float(totalP), dt);
+    UpdateWaveform(samples, sampleRate, dt);
+}
+
+void AudioAnalyzer::UpdateWaveform(const float* samples, float sampleRate, float dt) {
+    // Oscilloscope-style: start at a rising zero crossing so the shape stands still.
+    const int span = std::clamp(static_cast<int>(sampleRate * 0.02f), 128, kFftSize / 2);
+    int start = kFftSize - span;
+    for (int i = kFftSize - span - 1; i > kFftSize - 2 * span && i > 0; --i) {
+        if (samples[i - 1] < 0.0f && samples[i] >= 0.0f) { start = i; break; }
+    }
+    float peak = 0.0f;
+    for (int i = 0; i < span; ++i) peak = std::max(peak, std::fabs(samples[start + i]));
+    m_wavePeak = std::max({ peak, m_wavePeak * std::exp(-dt / 1.5f), 1e-3f });
+
+    const float per = static_cast<float>(span) / AudioFeatures::kWaveformPoints;
+    for (int p = 0; p < AudioFeatures::kWaveformPoints; ++p) {
+        const int a = start + static_cast<int>(p * per);
+        const int b = std::max(a + 1, start + static_cast<int>((p + 1) * per));
+        float sum = 0.0f;
+        for (int i = a; i < b; ++i) sum += samples[i];
+        m_features.waveform[p] = std::clamp(sum / (b - a) / m_wavePeak, -1.0f, 1.0f);
+    }
+}
+
+void AudioAnalyzer::UpdateStructure(float bassPower, float highPower, float totalPower, float dt) {
+    AudioFeatures& f = m_features;
+    const float bassDb = ToDb(bassPower), highDb = ToDb(highPower), levelDb = ToDb(totalPower);
+    if (!m_structureInit) {
+        m_structureInit = true;
+        m_bassShort = m_bassRef = bassDb;
+        m_highShort = highDb;
+        m_levelFast = m_levelSlow = levelDb;
+    }
+    f.drop *= std::exp(-dt / 1.0f);
+    m_dropCooldown = std::max(0.0f, m_dropCooldown - dt);
+
+    if (f.silent) {   // nothing to analyse; don't let silence look like "bass removed"
+        m_bassAbsentTime = 0.0f;
+        f.buildUp = Smooth(f.buildUp, 0.0f, dt, 1.0f, 0.5f);
+        return;
+    }
+
+    m_bassShort = Smooth(m_bassShort, bassDb, dt, 0.08f, 0.15f);
+    m_bassRef = Smooth(m_bassRef, m_bassShort, dt, 0.5f, 20.0f);   // the song's usual bass level
+    m_highShort = Smooth(m_highShort, highDb, dt, 0.3f, 0.3f);
+    m_levelFast = Smooth(m_levelFast, levelDb, dt, 0.05f, 0.1f);
+    m_levelSlow = Smooth(m_levelSlow, levelDb, dt, 2.0f, 2.0f);
+
+    // Slope of the high band over the last 4 s (dB per second) via least squares.
+    m_historyTimer += dt;
+    while (m_historyTimer >= 0.1f) {
+        m_historyTimer -= 0.1f;
+        m_highHistory[m_highWrite] = m_highShort;
+        m_highWrite = (m_highWrite + 1) % 40;
+        m_highCount = std::min(m_highCount + 1, 40);
+    }
+    float slope = 0.0f;
+    if (m_highCount >= 20) {
+        const int n = m_highCount;
+        float sx = 0, sy = 0, sxx = 0, sxy = 0;
+        for (int i = 0; i < n; ++i) {
+            const float x = i * 0.1f;
+            const float y = m_highHistory[(m_highWrite - n + i + 40) % 40];
+            sx += x; sy += y; sxx += x * x; sxy += x * y;
+        }
+        slope = (n * sxy - sx * sy) / std::max(n * sxx - sx * sx, 1e-6f);
+    }
+
+    const bool bassAbsent = m_bassShort < m_bassRef - 9.0f;
+    m_bassAbsentTime = bassAbsent ? m_bassAbsentTime + dt : 0.0f;
+
+    // Build-up: the highs are steadily rising (risers, snare rolls), more so with the bass cut.
+    float build = std::clamp((slope - 0.5f) / 3.0f, 0.0f, 1.0f) * (bassAbsent ? 1.0f : 0.5f);
+    f.buildUp = Smooth(f.buildUp, build, dt, 1.0f, 0.6f);
+
+    // Drop: the bass slams back in after being away, or a big jump in level after a build.
+    const bool bassReturn = !bassAbsent && m_lastBassAbsent >= 1.5f;
+    const bool levelJump = f.buildUp > 0.3f && !bassAbsent && m_levelFast > m_levelSlow + 6.0f;
+    if ((bassReturn || levelJump) && m_dropCooldown <= 0.0f) {
+        f.drop = 1.0f;
+        ++f.dropCount;
+        f.buildUp = 0.0f;
+        m_dropCooldown = 6.0f;
+    }
+    m_lastBassAbsent = m_bassAbsentTime;
 }

@@ -1,19 +1,24 @@
 #pragma once
 #include "audio/AudioFeatures.h"
+#include "audio/BeatTracker.h"
+#include "audio/Fft.h"
 #include <complex>
 
-// Turns a window of recent mono samples into AudioFeatures: FFT, log-spaced
-// bands, automatic gain, attack/release smoothing and bass-onset beat detection.
-// Pure computation (no Windows/audio APIs) so it can be tested with synthetic signals.
+// Turns recent mono audio into AudioFeatures: FFT, log-spaced bands, automatic
+// gain, attack/release smoothing, onset beats, the beat grid (BeatTracker) and
+// song-structure cues (build-ups, drops). Pure computation, no Windows/audio
+// APIs, so it can be tested with synthetic signals.
 class AudioAnalyzer {
 public:
     static constexpr int kFftSize = 2048;
 
     AudioAnalyzer();
 
-    // samples: the latest kFftSize mono samples, oldest first.
-    // newData: false if no new audio arrived since the previous call.
+    // 1. Every frame, all *new* samples since the last frame (feeds the beat grid).
+    void ProcessStream(const float* samples, size_t count, float sampleRate);
+    // 2. Then the latest kFftSize samples, oldest first. newData: false if nothing arrived.
     void Update(const float* samples, float sampleRate, bool newData, float dt);
+
     const AudioFeatures& Features() const { return m_features; }
 
 private:
@@ -21,12 +26,11 @@ private:
     static constexpr int kBands = AudioFeatures::kSpectrumBands;
 
     void ConfigureBands(float sampleRate);
-    void Fft();
+    void UpdateWaveform(const float* samples, float sampleRate, float dt);
+    void UpdateStructure(float bassPower, float highPower, float totalPower, float dt);
 
-    // FFT tables and buffers
+    Fft m_fftEngine{ kFftSize };
     float m_window[kFftSize];
-    std::complex<float> m_twiddle[kFftSize / 2];
-    int m_bitReverse[kFftSize];
     std::complex<float> m_fft[kFftSize];
     float m_power[kBins];
 
@@ -35,12 +39,27 @@ private:
     int m_bandLo[kBands], m_bandHi[kBands];
     float m_bandCenter[kBands], m_bandTilt[kBands];
     int m_fluxLo = 1, m_fluxHi = 2;
+    int m_bassBinHi = 2, m_highBinLo = 3, m_highBinHi = 4;
     float m_prevLogMag[kBins] = {};
 
     // Adaptive state
     float m_referenceDb = -50.0f;
     float m_fluxMean = 0, m_fluxVar = 0;
     float m_timeSinceBeat = 10.0f;
+    float m_wavePeak = 0.01f;
 
+    // Structure detection (raw dB, before auto-gain)
+    bool m_structureInit = false;
+    float m_bassShort = 0, m_bassRef = 0;
+    float m_highShort = 0;
+    float m_levelFast = 0, m_levelSlow = 0;
+    float m_highHistory[40] = {};   // 4 s of m_highShort at 10 Hz
+    int m_highWrite = 0, m_highCount = 0;
+    float m_historyTimer = 0;
+    float m_bassAbsentTime = 0;
+    float m_lastBassAbsent = 0;     // previous frame's m_bassAbsentTime
+    float m_dropCooldown = 0;
+
+    BeatTracker m_beats;
     AudioFeatures m_features;
 };

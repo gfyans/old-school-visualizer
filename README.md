@@ -4,7 +4,15 @@ A modern take on the Winamp-era music visualiser. A single small `.exe` with no 
 It listens to whatever your PC is playing (Spotify, a browser, games…) and renders it on the GPU.
 
 * **Nebula**: fly through a glowing volumetric gas cloud that reacts to the music.
+* **Liquid**: Milkdrop-style feedback. Waveform ink is warped, faded and hue-shifted every frame into
+  tunnels, vortices, ripples and kaleidoscopes.
 * **Spectrum**: classic bar spectrum.
+
+It also understands the music beyond loudness:
+* **Beat grid:** it locks onto the song's tempo and *predicts* beats, so pulses land on the beat instead of just after it.
+* **Song structure:** it detects build-ups and drops.
+* **Now playing:** it shows the track title and takes colours from the album art (Spotify, browsers, any app that
+  shows up in Windows' media flyout).
 
 ## Keys
 
@@ -12,14 +20,17 @@ It listens to whatever your PC is playing (Spotify, a browser, games…) and ren
 |---|---|
 | `←` `→` | Previous / next visualiser (crossfades) |
 | `F`, `Alt+Enter`, double-click | Toggle fullscreen |
-| `N` | Nebula: next look (palette + gas shape) |
-| `Space` | Nebula: lock / unlock the current look |
+| `N` | Next look (Nebula: palette + gas shape; Liquid: preset) |
+| `Space` | Lock / unlock the current look |
+| `B` | Equaliser bars along the bottom (glass bars with falling peak caps, tinted to the current look) |
+| `A` | Album-art colours on / off |
+| `T` | Track titles on / off |
 | `D` | Cycle audio device: system default → each output → … |
 | `F1` | Stats: fps, resolution, GPU time, audio device, level meters |
 | `H` | Help |
 | `Esc` | Leave fullscreen, or quit |
 
-Window position, fullscreen, the last visualiser and the chosen audio device are remembered in
+Window position, fullscreen, the last visualiser, the audio device and the B/A/T toggles are remembered in
 `%APPDATA%\Visualizer\settings.ini` (delete it to reset).
 
 **No visuals reacting?** Press `F1`. If it says *(silent)* while music plays, your player is outputting to a
@@ -33,16 +44,30 @@ Press `D` until the device your music plays on is selected.
 | Bass | Denser, brighter gas; the light core swells |
 | Mids | More turbulence; the gas churns faster |
 | Treble | Stars twinkle; sparkles in the gas |
-| Beat | Shockwave from the core, brightness kick, slight zoom punch |
+| Beat | Shockwave from the core, brightness kick, gentle zoom swell. Locked to the predicted beat once the tempo is found |
 | Loudness of the section | Flight speed and overall brightness |
-| New section / drop | Blends to a new look; also every ~32 beats |
+| Build-up | Flight accelerates, gas thins and churns faster, light intensifies |
+| Drop | Big shockwave and flash, fast switch to a new look |
+| Phrase (8 bars) | Blends to a new look, on the downbeat |
+| New song | New look; with album colours on, palettes come from the cover art |
 | Silence | Calm slow drift, dimmer, drops to 30 fps |
+
+## Listening: beat grid and structure
+
+* **Tempo and phase.** A 100 Hz onset envelope (log spectral flux) is autocorrelated over 5 s to find the beat period.
+  A comb filter over the bass onsets then finds where the beats fall, and a phase-locked oscillator predicts them.
+  In tests, predicted beats land within 14–21 ms of the real kicks at 120–140 BPM; very fast tempos like 174 BPM DnB
+  lock at half-time (87). `F1` shows BPM and confidence; the lower beat lamp flashes on the predicted beat.
+* **Build-ups:** the high band rising steadily over several seconds, especially with the bass cut.
+* **Drops:** the bass returning after at least 1.5 s away, or a big level jump after a build. These are measured
+  in raw dB before auto-gain, so they don't depend on volume.
 
 ## Performance
 
 Measured on an RTX 3080 at 2560×1440 fullscreen:
 
-* Nebula: about 0.9 ms GPU per frame, rendered at half resolution and upscaled.
+* Nebula: about 1.1–1.8 ms GPU per frame, rendered at 60% resolution and upscaled.
+* Liquid: about 0.06 ms GPU per frame.
 * Spectrum: 0.01 ms GPU per frame.
 * CPU: under 1% of one core in a window, about 3.5% fullscreen with the stats overlay.
 
@@ -80,13 +105,17 @@ src/
   main.cpp                  window + loop + keys; RegisterVisualizers() is the list of visualisers
   platform/                 Window (borderless fullscreen), FrameLimiter, Settings
   audio/AudioCapture        WASAPI loopback thread → lock-free ring buffer; device selection
-  audio/AudioAnalyzer       FFT → 64 log bands, auto-gain, smoothing, beat detection → AudioFeatures
+  audio/AudioAnalyzer       FFT → 64 log bands, auto-gain, smoothing, onset beats, build-ups/drops, waveform → AudioFeatures
+  audio/BeatTracker         tempo + beat phase: onset envelope, autocorrelation, comb filter, phase-locked oscillator
+  media/NowPlaying          Windows media sessions (C++/WinRT): title, artist, album art
+  media/TrackPalette        album art → deep / mid / hot palette
   render/Renderer           D3D11 device, flip-model swap chain, composite pass, Direct2D overlay target
   render/GpuTimer           non-blocking GPU timestamp queries
   viz/Visualizer.h          the plug-in interface (IVisualizer)
   viz/VisualizerHost        offscreen targets, crossfades, adaptive resolution
-  viz/nebula/, viz/spectrum/
-  ui/Overlay                messages, F1 stats, H help (DirectWrite)
+  viz/nebula/, viz/feedback/, viz/spectrum/
+  ui/Overlay                messages, now-playing caption, F1 stats, H help (DirectWrite)
+  ui/EqBars                 optional equaliser bars drawn over any visualiser
 shaders/                    HLSL, compiled at build time into headers
 tests/                      analyzer_test (synthetic signals), capture_probe
 ```
@@ -104,9 +133,13 @@ Per frame:
    * `CreateResources` / `ReleaseResources`: create your shaders and buffers (also called again after GPU device loss).
    * `Update(audio, dt)`: animate from `AudioFeatures` (all values 0–1).
    * `Render(renderer, time, dt)`: bind your resources (slots `b2+`, `t0+`, `s0+` are free) and call `renderer.DrawFullscreen(ps)`.
-   * Optionally: `RenderScale()` (e.g. `0.5` for soft looks), `OnKey`, `TakeMessage`, `Status`.
+   * Optionally: `RenderScale()` (e.g. `0.5` for soft looks), `OnKey`, `TakeMessage`, `Status`,
+     `AccentColours` (tints the EQ bars), `SetTrackPalette` (album colours, song changes).
+   * Multi-pass effects can render into their own textures and restore `renderer.BoundTarget()`
+     (see `FeedbackVisualizer`).
 2. Add the shader to `CMakeLists.txt` with `compile_shader(...)` and the `.cpp` to the executable sources.
 3. Register it in `RegisterVisualizers()` in `main.cpp`. Registration order is the `←`/`→` order.
 
-Every shader can read `iTime`, `iResolution` (b0) and the audio features `aBands`, `aLevel`, `aIntensity`, `aBeat`,
-`Spectrum(i)` (b1) from `shaders/common.hlsli`.
+Every shader can read `iTime`, `iResolution` (b0) and the audio features (b1) from `shaders/common.hlsli`:
+`aBands`, `aLevel`, `aIntensity`, `aBeat`, `aTempo` (bpm, beat phase, bar phase, confidence),
+`aStructure` (build-up, drop, …), `Spectrum(i)` / `SpectrumAt(x)` and `Waveform(i)` / `WaveformAt(x)`.

@@ -27,6 +27,8 @@ public:
     bool OnKey(UINT vk) override;
     std::wstring TakeMessage() override;
     std::wstring Status() const override;
+    void AccentColours(float lo[3], float hi[3]) const override;
+    void SetTrackPalette(const TrackPalette* palette, bool newTrack) override;
 
     struct Look {
         float deep[3], mid[3], hot[3];                       // palette (linear RGB)
@@ -34,7 +36,7 @@ public:
     };
 
 private:
-    void NextLook();
+    void NextLook(float blendSeconds = 6.0f);
     Look CurrentLook() const;
 
     Microsoft::WRL::ComPtr<ID3D11PixelShader> m_ps;
@@ -51,7 +53,21 @@ private:
     bool m_locked = false;
     float m_timeSinceChange = 0.0f;
     int m_beatsSinceChange = 0;
-    float m_intensityBaseline = 0.0f;
+    float m_lookBlendSeconds = 6.0f;
+
+    // Beat grid and song structure
+    uint32_t m_lastGridBeat = 0, m_lastDropCount = 0;
+    int m_gridBeatsSinceChange = 0;
+    bool m_changePending = false;
+    float m_lastBarPhase = 0.0f;
+    float m_gridPulse = 0.0f;   // 1 exactly on each predicted beat, decays through the beat
+    float m_dropFlash = 0.0f;
+    float m_buildUp = 0.0f;
+
+    // Album-art palette (replaces the built-in palettes while set)
+    bool m_hasArt = false;
+    TrackPalette m_art{};
+    int m_artVariant = 0;
 
     // Motion
     double m_pos[3] = { 10.0, 20.0, 30.0 };

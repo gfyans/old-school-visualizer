@@ -1,20 +1,37 @@
 #pragma once
 #include <cstdint>
 
-// What every visualiser gets each frame. All levels are 0..1, auto-gained so
+// What every visualiser gets each frame. Levels are 0..1, auto-gained so
 // quiet and loud tracks (and any system volume) fill the same range.
 struct AudioFeatures {
     static constexpr int kSpectrumBands = 64;
+    static constexpr int kWaveformPoints = 128;
 
+    // --- Levels ---
     float bass = 0;        //   20 –  250 Hz
     float lowMid = 0;      //  250 – 1000 Hz
     float highMid = 0;     // 1000 – 4000 Hz
     float treble = 0;      // 4000 – 16000 Hz
     float level = 0;       // overall loudness right now
     float intensity = 0;   // slow (~5 s) average of level: how "big" this section of the song is
-    float beat = 0;        // 1 on a detected beat, decays to 0 in ~0.15 s
-    uint32_t beatCount = 0;
     bool silent = true;    // digital silence (nothing playing)
 
-    float spectrum[kSpectrumBands] = {};   // log-spaced 30 Hz – 16 kHz
+    // --- Onset beats (reactive: fire when a hit is heard) ---
+    float beat = 0;        // 1 on a detected beat, decays to 0 in ~0.15 s
+    uint32_t beatCount = 0;
+
+    // --- Beat grid (predictive: locked to the song's tempo) ---
+    float bpm = 0;              // 0 until a tempo is found
+    float beatPhase = 0;        // 0..1 through the current beat; wraps to 0 exactly on the beat
+    float barPhase = 0;         // 0..1 through the current 4-beat bar
+    uint32_t gridBeat = 0;      // increments on every predicted beat
+    float tempoConfidence = 0;  // 0..1: use the grid when this is high (> ~0.4)
+
+    // --- Song structure ---
+    float buildUp = 0;          // 0..1: rising tension (risers, rolls, bass pulled out)
+    float drop = 0;             // 1 when a drop lands, decays over ~1 s
+    uint32_t dropCount = 0;
+
+    float spectrum[kSpectrumBands] = {};      // log-spaced 30 Hz – 16 kHz
+    float waveform[kWaveformPoints] = {};     // ~20 ms, -1..1, triggered on a rising zero crossing
 };

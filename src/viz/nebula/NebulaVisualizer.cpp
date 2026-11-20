@@ -165,16 +165,30 @@ NebulaVisualizer::Look NebulaVisualizer::CurrentLook() const {
     return Blend(m_from, m_to, t);
 }
 
-void NebulaVisualizer::NextLook() {
+void NebulaVisualizer::NextLook(float blendSeconds) {
     m_from = CurrentLook();   // start from exactly what's on screen, even mid-blend
     const int newPalette = (m_paletteIndex + 1 + std::uniform_int_distribution<int>(0, kPaletteCount - 2)(m_rng)) % kPaletteCount;
     const int newShape = (m_shapeIndex + 1 + std::uniform_int_distribution<int>(0, kShapeCount - 2)(m_rng)) % kShapeCount;
     m_paletteIndex = newPalette;
     m_shapeIndex = newShape;
     m_to = MakeLook(m_paletteIndex, m_shapeIndex);
+    if (m_hasArt) {
+        // Album colours: keep the song's palette, vary which colour leads so looks still change.
+        const float* mid = (m_artVariant & 1) ? m_art.hot : m_art.mid;
+        const float* hot = (m_artVariant & 1) ? m_art.mid : m_art.hot;
+        for (int c = 0; c < 3; ++c) {
+            m_to.deep[c] = SrgbToLinear(m_art.deep[c]);
+            m_to.mid[c] = SrgbToLinear(mid[c]);
+            m_to.hot[c] = SrgbToLinear(hot[c]);
+        }
+        ++m_artVariant;
+    }
     m_lookBlend = 0.0f;
+    m_lookBlendSeconds = blendSeconds;
     m_timeSinceChange = 0.0f;
     m_beatsSinceChange = 0;
+    m_gridBeatsSinceChange = 0;
+    m_changePending = false;
 }
 
 void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
@@ -192,37 +206,58 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_beatPulse *= std::exp(-dt / 0.35f);
     m_shellAge += dt;
 
-    // --- Look changes (song sections) ----------------------------------------
+    // --- Song structure: drops and phrases ------------------------------------
+    const bool gridLocked = audio.tempoConfidence > 0.4f;
+    m_gridPulse = gridLocked ? std::pow(1.0f - audio.beatPhase, 4.0f) * audio.tempoConfidence : 0.0f;
+    if (gridLocked && audio.gridBeat != m_lastGridBeat) ++m_gridBeatsSinceChange;
+    m_lastGridBeat = audio.gridBeat;
+
     m_timeSinceChange += dt;
-    m_intensityBaseline = Smooth(m_intensityBaseline, audio.intensity, dt, 20.0f, 20.0f);
-    const bool drop = audio.intensity > m_intensityBaseline + 0.12f && m_timeSinceChange > 10.0f;
-    const bool phraseDone = m_beatsSinceChange >= 32 && m_timeSinceChange > 20.0f;
-    if (!m_locked && (phraseDone || drop || m_timeSinceChange > 60.0f)) {
-        NextLook();
-        if (drop) m_intensityBaseline = audio.intensity;   // one change per drop
+    if (audio.dropCount != m_lastDropCount) {
+        m_lastDropCount = audio.dropCount;
+        // The drop: big shockwave and a fast switch to a new look.
+        m_shellAge = 0.0f;
+        m_shellPower = 2.0f;
+        m_dropFlash = 1.0f;
+        if (!m_locked && m_timeSinceChange > 4.0f) NextLook(1.5f);
     }
-    m_lookBlend = std::min(1.0f, m_lookBlend + dt / kLookBlendSeconds);
+    m_dropFlash *= std::exp(-dt / 0.8f);
+
+    // Phrases: every 8 bars when the grid is locked (changing on the downbeat),
+    // otherwise every 32 heard beats; and at least once a minute.
+    const bool phraseDone = gridLocked ? m_gridBeatsSinceChange >= 32 : m_beatsSinceChange >= 32;
+    if (phraseDone && m_timeSinceChange > 20.0f) m_changePending = true;
+    const bool onDownbeat = audio.barPhase < m_lastBarPhase;   // bar phase wrapped
+    m_lastBarPhase = audio.barPhase;
+    if (!m_locked && ((m_changePending && (!gridLocked || onDownbeat)) || m_timeSinceChange > 60.0f))
+        NextLook(kLookBlendSeconds);
+    m_lookBlend = std::min(1.0f, m_lookBlend + dt / m_lookBlendSeconds);
 
     // --- Smoothed audio drivers ----------------------------------------------
     m_bass = Smooth(m_bass, audio.bass, dt, 0.03f, 0.25f);
     m_mids = Smooth(m_mids, 0.5f * (audio.lowMid + audio.highMid), dt, 0.1f, 0.6f);
     m_treble = Smooth(m_treble, audio.treble, dt, 0.02f, 0.2f);
+    m_buildUp = Smooth(m_buildUp, audio.buildUp, dt, 0.5f, 0.3f);
 
+    // Build-ups accelerate the flight; drops hit hard then settle.
     const float targetSpeed = audio.silent ? 0.25f
-        : 0.35f + 1.1f * audio.intensity + 0.5f * audio.bass + 0.25f * m_beatPulse;
+        : 0.35f + 1.1f * audio.intensity + 0.5f * audio.bass + 0.25f * m_beatPulse + 1.2f * m_buildUp;
     m_speed = Smooth(m_speed, targetSpeed, dt, 0.5f, 2.0f);
 
     // Beat zoom: small and eased in (never a one-frame jump), which is what avoids motion sickness.
-    m_zoom = Smooth(m_zoom, m_beatPulse, dt, 0.15f, 0.6f);
+    m_zoom = Smooth(m_zoom, std::max(m_beatPulse, m_gridPulse), dt, 0.15f, 0.6f);
 
-    const float targetExposure = audio.silent ? 0.8f : 0.7f + 0.3f * audio.level + 0.3f * m_beatPulse;
+    const float targetExposure = audio.silent ? 0.8f
+        : 0.7f + 0.3f * audio.level + 0.2f * m_beatPulse + 0.15f * m_gridPulse + 0.25f * m_buildUp + 0.5f * m_dropFlash;
     m_exposure = Smooth(m_exposure, targetExposure, dt, 0.08f, 0.8f);
 
-    const float targetLight = audio.silent ? 0.6f : 0.6f + 0.7f * m_bass + 0.9f * m_beatPulse;
+    // With a locked grid, the core's heartbeat follows the predicted beat (no lag).
+    const float pulse = gridLocked ? std::max(m_gridPulse, 0.5f * m_beatPulse) : m_beatPulse;
+    const float targetLight = audio.silent ? 0.6f : 0.6f + 0.7f * m_bass + 0.9f * pulse + 0.6f * m_buildUp;
     m_lightStrength = Smooth(m_lightStrength, targetLight, dt, 0.03f, 0.35f);
 
-    m_swirl += dt * (0.003f + 0.02f * m_mids);
-    m_rollDrift += dt * 0.04f * m_mids;
+    m_swirl += dt * (0.003f + 0.02f * m_mids + 0.03f * m_buildUp);   // tension: the gas churns faster
+    m_rollDrift += dt * (0.04f * m_mids + 0.05f * m_buildUp);
 
     // --- Camera: slow wandering heading, flying forward ------------------------
     const float t = m_time;
@@ -280,7 +315,7 @@ void NebulaVisualizer::Render(Renderer& renderer, float, float) {
     Copy3(c.colHot, look.hot);
     c.absorb = look.absorb;
     c.ambient = 0.3f;
-    c.threshold = look.threshold - 0.035f * m_bass;
+    c.threshold = look.threshold - 0.035f * m_bass + 0.04f * m_buildUp;   // build-up thins the gas: tension
     c.gain = look.gain * 1.15f * (1.0f + 0.25f * m_bass);
     c.warp = look.warp * (1.0f + 0.7f * m_mids);
     c.filament = look.filament;
@@ -324,7 +359,25 @@ std::wstring NebulaVisualizer::TakeMessage() {
     return m;
 }
 
+void NebulaVisualizer::AccentColours(float lo[3], float hi[3]) const {
+    const Look look = CurrentLook();
+    for (int c = 0; c < 3; ++c) {   // look colours are linear; overlays want display values
+        lo[c] = std::pow(look.mid[c], 1.0f / 2.2f);
+        hi[c] = std::pow(look.hot[c], 1.0f / 2.2f);
+    }
+}
+
 std::wstring NebulaVisualizer::Status() const {
-    return std::wstring(kPalettes[m_paletteIndex].name) + L" · " + kShapes[m_shapeIndex].name +
-           (m_locked ? L" (locked)" : L"");
+    return std::wstring(m_hasArt ? L"Album colours" : kPalettes[m_paletteIndex].name) + L" · " +
+           kShapes[m_shapeIndex].name + (m_locked ? L" (locked)" : L"");
+}
+
+void NebulaVisualizer::SetTrackPalette(const TrackPalette* palette, bool newTrack) {
+    const bool changed = (palette != nullptr) != m_hasArt ||
+                         (palette && memcmp(palette, &m_art, sizeof(TrackPalette)) != 0);
+    m_hasArt = palette != nullptr;
+    if (palette) m_art = *palette;
+    m_artVariant = 0;
+    // New song, or its colours just arrived / were toggled: blend to a matching look.
+    if (!m_locked && (newTrack || changed)) NextLook(newTrack ? 2.0f : 3.0f);
 }

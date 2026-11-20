@@ -11,6 +11,9 @@ struct Settings {
     bool fullscreen = false;
     std::wstring visualizer;    // name of the last visualiser shown
     std::wstring audioDevice;   // endpoint ID; empty = follow the system default
+    bool showBars = false;      // equaliser bars along the bottom
+    bool albumColours = true;   // take palettes from the playing track's album art
+    bool trackTitles = true;    // show title/artist when a song starts
 
     void Load();
     void Save() const;

@@ -1,11 +1,14 @@
 #include "audio/AudioAnalyzer.h"
 #include "audio/AudioCapture.h"
+#include "media/NowPlaying.h"
 #include "platform/FrameLimiter.h"
 #include "platform/Settings.h"
 #include "platform/Window.h"
 #include "render/Renderer.h"
+#include "ui/EqBars.h"
 #include "ui/Overlay.h"
 #include "viz/VisualizerHost.h"
+#include "viz/feedback/FeedbackVisualizer.h"
 #include "viz/nebula/NebulaVisualizer.h"
 #include "viz/spectrum/SpectrumVisualizer.h"
 
@@ -21,6 +24,7 @@ constexpr double kIdleFps = 30.0;
 // To add a visualiser: implement IVisualizer and add it here. Order = ←/→ order.
 void RegisterVisualizers(VisualizerHost& host) {
     host.Add(std::make_unique<NebulaVisualizer>());
+    host.Add(std::make_unique<FeedbackVisualizer>());
     host.Add(std::make_unique<SpectrumVisualizer>());
 }
 
@@ -75,8 +79,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     Overlay overlay;
     overlay.Init();
 
+    EqBars eqBars;
+    eqBars.SetVisible(settings.showBars);
+
     auto createDeviceResources = [&] {
         overlay.CreateDeviceResources(renderer.D2DContext());
+        eqBars.CreateResources(renderer.Device());   // optional: bars just won't draw if this fails
         return host.CreateResources(renderer);
     };
     if (!createDeviceResources()) { Fatal(L"Could not create graphics resources."); return 1; }
@@ -86,9 +94,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     auto capture = std::make_unique<AudioCapture>();
     auto analyzer = std::make_unique<AudioAnalyzer>();
     float samples[AudioAnalyzer::kFftSize];
+    constexpr size_t kStreamChunk = AudioCapture::kRingSize / 2;
+    auto streamChunk = std::make_unique<float[]>(kStreamChunk);
     uint64_t lastSampleCount = 0;
     capture->SetPreferredDevice(settings.audioDevice);
     capture->Start();
+
+    // Now playing: title/artist captions and album-art palettes.
+    NowPlaying nowPlaying;
+    nowPlaying.Start();
+    bool albumColours = settings.albumColours, trackTitles = settings.trackTitles;
+    TrackInfo track;
+    uint32_t seenSerial = 0, seenTrack = 0, seenPalette = 0;
+    auto applyPalette = [&](bool newTrack) {
+        host.SetTrackPalette(albumColours && track.hasPalette ? &track.palette : nullptr, newTrack);
+    };
 
     bool showStats = false, showHelp = false;
     auto announce = [&] { overlay.ShowMessage(host.Active().Name()); };
@@ -116,6 +136,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         settings.fullscreen = window.IsFullscreen();
         settings.visualizer = host.Active().Name();
         settings.audioDevice = capture->PreferredDevice();
+        settings.showBars = eqBars.Visible();
+        settings.albumColours = albumColours;
+        settings.trackTitles = trackTitles;
         settings.Save();
     };
     window.onClose = saveSettings;   // while the window still exists
@@ -133,6 +156,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         case VK_F1:      showStats = !showStats; break;
         case 'H':        showHelp = !showHelp; break;
         case 'D':        cycleAudioDevice(); break;
+        case 'B':
+            eqBars.SetVisible(!eqBars.Visible());
+            overlay.ShowMessage(eqBars.Visible() ? L"Equaliser bars on" : L"Equaliser bars off", 1.5f);
+            break;
+        case 'A':
+            albumColours = !albumColours;
+            applyPalette(false);
+            overlay.ShowMessage(albumColours ? (track.hasPalette ? L"Album colours on" : L"Album colours on (none for this track)")
+                                             : L"Album colours off", 2.0f);
+            break;
+        case 'T':
+            trackTitles = !trackTitles;
+            if (trackTitles && !track.title.empty()) overlay.ShowTrack(track.title, track.artist);
+            else overlay.ShowMessage(L"Track titles off", 1.5f);
+            break;
         default:         host.Active().OnKey(vk); break;
         }
     };
@@ -184,6 +222,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
         // --- Audio ---
         const uint64_t sampleCount = capture->TotalSamples();
+        // Everything new since last frame feeds the beat grid (it works on a fixed 100 Hz hop).
+        const size_t fresh = static_cast<size_t>(std::min<uint64_t>(sampleCount - lastSampleCount, kStreamChunk));
+        if (fresh > 0) {
+            capture->GetLatest(streamChunk.get(), fresh);
+            analyzer->ProcessStream(streamChunk.get(), fresh, static_cast<float>(capture->SampleRate()));
+        }
         capture->GetLatest(samples, AudioAnalyzer::kFftSize);
         analyzer->Update(samples, static_cast<float>(capture->SampleRate()), sampleCount != lastSampleCount, dt);
         lastSampleCount = sampleCount;
@@ -195,13 +239,30 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             applyFrameRate();
         }
 
+        // --- Now playing ---
+        if (nowPlaying.Serial() != seenSerial) {
+            seenSerial = nowPlaying.Serial();
+            track = nowPlaying.Get();
+            const bool newTrack = track.trackSerial != seenTrack;
+            const bool newPalette = track.paletteSerial != seenPalette;
+            seenTrack = track.trackSerial;
+            seenPalette = track.paletteSerial;
+            if (newTrack && trackTitles) overlay.ShowTrack(track.title, track.artist);
+            if (newTrack || newPalette) applyPalette(newTrack);
+        }
+
         // --- Visuals ---
         host.Update(audio, dt);
         std::wstring message = host.Active().TakeMessage();
         if (!message.empty()) overlay.ShowMessage(message);
 
         renderer.UploadAudio(audio);
-        host.Render(renderer, static_cast<float>(time), dt);
+        host.Render(renderer, static_cast<float>(time), dt);   // leaves the back buffer bound
+
+        float accentLo[3], accentHi[3];
+        host.Active().AccentColours(accentLo, accentHi);
+        eqBars.Update(audio, accentLo, accentHi, dt);
+        eqBars.Render(renderer);
 
         overlay.Update(dt);
         if (overlay.HasContent(showStats, showHelp)) {
@@ -221,7 +282,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
                     stats.visualizer = host.Active().Name();
                     stats.visualizerStatus = host.Active().Status();
                 }
-                overlay.Draw(d2d, renderer.Width(), renderer.Height(), stats, audio, showStats, showHelp);
+                overlay.Draw(d2d, renderer.Width(), renderer.Height(), stats, audio, showStats, showHelp,
+                             eqBars.Visible() ? 230.0f : 0.0f);
                 renderer.EndOverlay();
             }
         }
@@ -235,6 +297,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         case PresentResult::DeviceLost:
             host.ReleaseResources();
             overlay.ReleaseDeviceResources();
+            eqBars.ReleaseResources();
             if (!renderer.Reinit() || !createDeviceResources()) {
                 Fatal(L"The graphics device was lost and could not be recovered.");
                 return 1;

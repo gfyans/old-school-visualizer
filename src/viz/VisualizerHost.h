@@ -29,6 +29,10 @@ public:
     const IVisualizer& Active() const { return *m_slots[m_current].viz; }
 
     void Update(const AudioFeatures& audio, float dt);
+    // Album colours for every visualiser (nullptr = none). newTrack: the song changed.
+    void SetTrackPalette(const TrackPalette* palette, bool newTrack) {
+        for (Slot& s : m_slots) s.viz->SetTrackPalette(palette, newTrack);
+    }
     void Render(Renderer& renderer, float time, float dt);
 
     // Stats for the active visualiser.

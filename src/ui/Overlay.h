@@ -30,10 +30,13 @@ public:
     void ReleaseDeviceResources();
 
     void ShowMessage(const std::wstring& text, float seconds = 2.5f);
+    // Now-playing caption, shown for a few seconds when a song starts.
+    void ShowTrack(const std::wstring& title, const std::wstring& artist, float seconds = 7.0f);
     void Update(float dt);
     bool HasContent(bool stats, bool help) const;
+    // bottomInset: design-space pixels (1080p) kept clear at the bottom, e.g. for the EQ bars.
     void Draw(ID2D1DeviceContext* ctx, int width, int height, const OverlayStats& stats,
-              const AudioFeatures& audio, bool showStats, bool showHelp);
+              const AudioFeatures& audio, bool showStats, bool showHelp, float bottomInset = 0.0f);
 
 private:
     void DrawText(ID2D1DeviceContext* ctx, const std::wstring& text, IDWriteTextFormat* format,
@@ -43,8 +46,11 @@ private:
 
     Microsoft::WRL::ComPtr<IDWriteFactory> m_dwrite;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> m_titleFormat, m_bodyFormat, m_monoFormat;
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> m_trackFormat, m_artistFormat;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_brush;
 
     std::wstring m_message;
     float m_messageTime = 0, m_messageDuration = 0;
+    std::wstring m_trackTitle, m_trackArtist;
+    float m_trackTime = 0, m_trackDuration = 0;
 };

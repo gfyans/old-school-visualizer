@@ -180,6 +180,15 @@ void Renderer::UploadAudio(const AudioFeatures& audio) {
     ac.beat = audio.beat;
     ac.beatCount = static_cast<float>(audio.beatCount);
     memcpy(ac.spectrum, audio.spectrum, sizeof(ac.spectrum));
+    ac.tempo[0] = audio.bpm;
+    ac.tempo[1] = audio.beatPhase;
+    ac.tempo[2] = audio.barPhase;
+    ac.tempo[3] = audio.tempoConfidence;
+    ac.structure[0] = audio.buildUp;
+    ac.structure[1] = audio.drop;
+    ac.structure[2] = static_cast<float>(audio.gridBeat);
+    ac.structure[3] = static_cast<float>(audio.dropCount);
+    memcpy(ac.waveform, audio.waveform, sizeof(ac.waveform));
     UploadConstants(m_context.Get(), m_audioCB.Get(), ac);
 }
 
@@ -187,6 +196,9 @@ void Renderer::BindTarget(ID3D11RenderTargetView* rtv, int width, int height, fl
     UploadConstants(m_context.Get(), m_frameCB.Get(),
         FrameConstants{ time, deltaTime, static_cast<float>(width), static_cast<float>(height) });
 
+    m_boundRTV = rtv;
+    m_boundW = width;
+    m_boundH = height;
     m_context->OMSetRenderTargets(1, &rtv, nullptr);
     D3D11_VIEWPORT vp{ 0, 0, static_cast<float>(width), static_cast<float>(height), 0, 1 };
     m_context->RSSetViewports(1, &vp);

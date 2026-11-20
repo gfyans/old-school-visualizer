@@ -23,6 +23,9 @@ struct AudioConstants {
     float beat;
     float beatCount;
     float spectrum[AudioFeatures::kSpectrumBands];
+    float tempo[4];       // bpm, beat phase, bar phase, confidence
+    float structure[4];   // build-up, drop pulse, grid beat count, drop count
+    float waveform[AudioFeatures::kWaveformPoints];
 };
 static_assert(sizeof(AudioConstants) % 16 == 0);
 
@@ -49,6 +52,10 @@ public:
     void WaitForNextFrame();
     void UploadAudio(const AudioFeatures& audio);   // once per frame; stays bound at b1
     void BindTarget(ID3D11RenderTargetView* rtv, int width, int height, float time, float deltaTime);
+    // The target most recently bound with BindTarget (lets multi-pass visualisers restore it).
+    ID3D11RenderTargetView* BoundTarget() const { return m_boundRTV; }
+    int BoundWidth() const { return m_boundW; }
+    int BoundHeight() const { return m_boundH; }
     void DrawFullscreen(ID3D11PixelShader* ps);
     // Draws layer a (or a->b crossfade by `mix`) scaled to the back buffer, with dithering.
     void Composite(const CompositeLayer& a, const CompositeLayer* b, float mix);
@@ -72,6 +79,8 @@ private:
 
     HWND m_hwnd = nullptr;
     int m_width = 0, m_height = 0;
+    ID3D11RenderTargetView* m_boundRTV = nullptr;   // not owned
+    int m_boundW = 0, m_boundH = 0;
 
     ComPtr<ID3D11Device> m_device;
     ComPtr<ID3D11DeviceContext> m_context;

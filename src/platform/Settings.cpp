@@ -49,6 +49,9 @@ void Settings::Load() {
     fullscreen = ReadInt(file, L"Fullscreen", 0) != 0;
     visualizer = ReadString(file, L"Visualizer");
     audioDevice = ReadString(file, L"AudioDevice");
+    showBars = ReadInt(file, L"ShowBars", 0) != 0;
+    albumColours = ReadInt(file, L"AlbumColours", 1) != 0;
+    trackTitles = ReadInt(file, L"TrackTitles", 1) != 0;
 }
 
 void Settings::Save() const {
@@ -64,4 +67,7 @@ void Settings::Save() const {
     WriteInt(file, L"Fullscreen", fullscreen ? 1 : 0);
     WriteString(file, L"Visualizer", visualizer);
     WriteString(file, L"AudioDevice", audioDevice);
+    WriteInt(file, L"ShowBars", showBars ? 1 : 0);
+    WriteInt(file, L"AlbumColours", albumColours ? 1 : 0);
+    WriteInt(file, L"TrackTitles", trackTitles ? 1 : 0);
 }
