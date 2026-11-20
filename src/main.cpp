@@ -12,6 +12,7 @@
 #include "viz/nebula/NebulaVisualizer.h"
 #include "viz/neongrid/NeonGridVisualizer.h"
 #include "viz/scope/ScopeVisualizer.h"
+#include "viz/aurora/AuroraVisualizer.h"
 #include "viz/spectrum/SpectrumVisualizer.h"
 
 #include <algorithm>
@@ -30,6 +31,7 @@ void RegisterVisualizers(VisualizerHost& host) {
     host.Add(std::make_unique<NeonGridVisualizer>());
     host.Add(std::make_unique<FeedbackVisualizer>());
     host.Add(std::make_unique<ScopeVisualizer>());
+    host.Add(std::make_unique<AuroraVisualizer>());
     host.Add(std::make_unique<SpectrumVisualizer>());
 }
 
