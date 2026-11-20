@@ -5,10 +5,10 @@
 
 class Renderer;
 
-// Optional equaliser bars along the bottom of the screen, drawn over any
-// visualiser: rounded glass bars with a gradient, glowing rims, floating peak
-// caps that fall with gravity, and a faint reflection. Colours follow the
-// active visualiser's palette. Fades in/out; costs nothing while hidden.
+// Optional cyberpunk equaliser along the bottom of the screen, drawn over any
+// visualiser: slanted neon LED columns with falling peak segments, chromatic
+// aberration, scanlines, glitch tears on hard hits and a HUD frame. Lightly
+// tinted by the active visualiser's palette. Fades in/out; free while hidden.
 class EqBars {
 public:
     static constexpr int kBars = 48;
@@ -38,4 +38,6 @@ private:
     float m_lo[3] = { 0.15f, 0.45f, 1.0f };
     float m_hi[3] = { 1.0f, 0.3f, 0.7f };
     float m_beat = 0.0f;
+    float m_glitch = 0.0f, m_seed = 0.0f, m_time = 0.0f;
+    uint32_t m_lastBeat = 0, m_lastDrop = 0;
 };

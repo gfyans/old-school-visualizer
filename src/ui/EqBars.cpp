@@ -12,6 +12,7 @@ struct EqConstants {   // matches cbuffer Eq in eqbars_ps.hlsl
     float peaks[EqBars::kBars];
     float lo[3];  float opacity;
     float hi[3];  float beat;
+    float glitch, seed, time, pad;
 };
 static_assert(sizeof(EqConstants) % 16 == 0);
 
@@ -79,6 +80,18 @@ void EqBars::Update(const AudioFeatures& audio, const float lo[3], const float h
         m_hi[c] = Smooth(m_hi[c], hi[c], dt, 1.5f, 1.5f);
     }
     m_beat = std::max(audio.beat, audio.tempoConfidence > 0.4f ? std::pow(1.0f - audio.beatPhase, 6.0f) : 0.0f);
+
+    // Glitch tears: hard kicks (and every drop) tear the bars for ~0.1 s, with a new pattern each time.
+    m_time += dt;
+    m_glitch *= std::exp(-dt / 0.09f);
+    const bool hardHit = audio.beatCount != m_lastBeat && audio.bass > 0.6f;
+    const bool drop = audio.dropCount != m_lastDrop;
+    if (hardHit || drop) {
+        m_glitch = drop ? 1.0f : std::max(m_glitch, 0.55f);
+        m_seed = std::fmod(m_seed + 0.618034f, 1.0f);
+    }
+    m_lastBeat = audio.beatCount;
+    m_lastDrop = audio.dropCount;
 }
 
 void EqBars::Render(Renderer& renderer) {
@@ -91,6 +104,9 @@ void EqBars::Render(Renderer& renderer) {
     memcpy(c.hi, m_hi, sizeof(c.hi));
     c.opacity = m_opacity;
     c.beat = m_beat;
+    c.glitch = m_glitch;
+    c.seed = m_seed;
+    c.time = std::fmod(m_time, 1000.0f);
 
     ID3D11DeviceContext* ctx = renderer.Context();
     D3D11_MAPPED_SUBRESOURCE mapped;

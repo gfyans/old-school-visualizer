@@ -1,94 +1,144 @@
 #include "common.hlsli"
 
-// Equaliser bars along the bottom: rounded glass bars with a palette gradient,
-// glowing rims, falling peak caps and a faint reflection. Output is
-// premultiplied alpha (alpha = how much of the scene is covered; rgb may add glow).
+// Cyberpunk equaliser along the bottom: slanted columns of neon LED segments
+// (cyan -> magenta -> warning yellow) over dim "ghost" segments, a floating peak
+// segment, chromatic aberration, scanlines and a rising scan band, glitch
+// slices that tear sideways on hard hits, and a HUD baseline with ticks and
+// corner brackets. Output is premultiplied alpha.
 
 cbuffer Eq : register(b2) {   // matches EqConstants in EqBars.cpp
     float4 eqValues[12];      // 48 bars, 0..1
     float4 eqPeaks[12];
     float3 eqLo;  float eqOpacity;
     float3 eqHi;  float eqBeat;
+    float eqGlitch; float eqSeed; float eqTime; float eqPad;
 };
 
 static const int kBars = 48;
+static const float kSkew = 0.22;   // columns lean right as they rise
 
 float BarValue(int i) { return Pick(eqValues[i >> 2], i & 3); }
 float PeakValue(int i) { return Pick(eqPeaks[i >> 2], i & 3); }
 
-// Signed distance to a box with rounded corners (radius r), centred at the origin.
-float SdRoundBox(float2 p, float2 halfSize, float r) {
-    float2 q = abs(p) - halfSize + r;
-    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+struct Layout {
+    float scale, marginX, areaW, baseY, maxH, segH, gap, slot, barW;
+    int segments;
+};
+
+Layout MakeLayout() {
+    Layout L;
+    L.scale = iResolution.y / 1080.0;                // authored at 1080p
+    L.marginX = iResolution.x * 0.06;
+    L.areaW = iResolution.x - 2.0 * L.marginX;
+    L.baseY = iResolution.y - 60.0 * L.scale;
+    L.segH = 7.0 * L.scale;                          // one LED segment incl. gap
+    L.gap = 2.0 * L.scale;
+    L.segments = (int)(iResolution.y * 0.17 / L.segH);
+    L.maxH = L.segments * L.segH;
+    L.slot = L.areaW / kBars;
+    L.barW = L.slot * 0.68;
+    return L;
+}
+
+float3 Neon(float t) {   // height through the column -> neon colour
+    const float3 cyan = float3(0.0, 0.95, 1.0);
+    const float3 magenta = float3(1.0, 0.1, 0.75);
+    const float3 warning = float3(1.0, 0.85, 0.15);
+    float3 c = lerp(cyan, magenta, smoothstep(0.15, 0.7, t));
+    return lerp(c, warning, smoothstep(0.8, 0.95, t));
+}
+
+// Colour (premultiplied) and coverage of the LED columns at a pixel.
+float4 Columns(float2 px, Layout L) {
+    float height = L.baseY - px.y;                   // above the baseline
+    if (height < 0.0 || height > L.maxH + L.segH) return 0;
+
+    float x = px.x - height * kSkew - L.marginX;      // undo the lean
+    float slotPos = x / L.slot;
+    int b = (int)floor(slotPos);
+    if (b < 0 || b >= kBars) return 0;
+    float lx = (frac(slotPos) - 0.5) * L.slot;        // -slot/2 .. slot/2 within the column
+    float dx = abs(lx) - L.barW * 0.5;                // > 0 outside the column
+    float inColumn = smoothstep(1.0, -1.0, dx);
+
+    int seg = (int)floor(height / L.segH);
+    float within = height - seg * L.segH;
+    float inSegment = smoothstep(L.gap - 0.5, L.gap + 0.5, within) * inColumn;
+    float t = (seg + 0.5) / L.segments;
+
+    float lit = BarValue(b) * L.segments;             // how many segments are on
+    int peakSeg = (int)floor(PeakValue(b) * L.segments);
+    float3 tint = lerp(eqLo, eqHi, t);
+
+    float4 o = 0;
+    if (seg < lit) {
+        float top = seg >= lit - 1.0 ? 1.6 : 1.0;     // the leading segment burns brightest
+        float3 c = lerp(Neon(t), tint, 0.2) * top * (1.0 + 0.6 * eqBeat);
+        o += float4(c, 0.9) * inSegment;
+    } else if (seg == peakSeg && peakSeg > 0) {
+        o += float4(float3(1.0, 0.95, 0.6) * 1.8, 1.0) * inSegment;   // floating peak
+    } else if (seg < L.segments) {
+        o += float4(Neon(t) * 0.06, 0.18) * inSegment;                // ghost (unlit) segment
+    }
+
+    // Neon bloom spilling sideways from the lit part of the column.
+    float glowH = saturate(lit / L.segments) * L.maxH;
+    if (height < glowH && dx > 0.0)
+        o.rgb += lerp(Neon(t), tint, 0.2) * exp(-dx / (5.0 * L.scale)) * 0.35 * (1.0 + eqBeat);
+    return o;
 }
 
 float4 main(VSOut i) : SV_Target {
+    Layout L = MakeLayout();
     float2 px = i.uv * iResolution;
-    float scale = iResolution.y / 1080.0;            // layout authored at 1080p
-    float marginX = iResolution.x * 0.05;
-    float areaW = iResolution.x - 2.0 * marginX;
-    float baseY = iResolution.y - 64.0 * scale;      // where bars stand
-    float maxH = iResolution.y * 0.16;
+    if (px.y < L.baseY - L.maxH - 30.0 * L.scale) return 0;   // well above the bars
 
-    // Cheap early-out for everything well above the bars.
-    if (px.y < baseY - maxH - 40.0 * scale) return 0;
+    // --- Glitch: on hard hits, horizontal slices tear sideways for a moment ---
+    float slice = floor(px.y / (9.0 * L.scale));
+    float3 g = Hash33(int3((int)slice, (int)(eqSeed * 977.0), 31));
+    float tear = step(1.0 - 0.4 * eqGlitch, g.x) * (g.y - 0.5) * 70.0 * L.scale * eqGlitch;
+    px.x += tear;
 
-    float slot = areaW / kBars;
-    float barW = slot * 0.62;
-    int b = clamp((int)floor((px.x - marginX) / slot), 0, kBars - 1);
-    float cx = marginX + (b + 0.5) * slot;
-    float v = BarValue(b);
-    float h = max(v * maxH, 3.0 * scale);
-    float radius = barW * 0.5;
-    float aa = 1.0;   // ~1 px anti-aliasing
+    // --- Columns with chromatic aberration (red and blue sampled slightly apart) ---
+    float ca = (1.2 + 3.5 * eqBeat + 6.0 * eqGlitch) * L.scale;
+    float4 mid = Columns(px, L);
+    float r = Columns(px + float2(ca, 0), L).r;
+    float b = Columns(px - float2(ca, 0), L).b;
+    float3 rgb = float3(r, mid.g, b);
+    float alpha = mid.a;
 
-    float3 rgb = 0;
-    float alpha = 0;
-
-    // --- Bar body: translucent glass with a vertical gradient ---
-    float sd = SdRoundBox(px - float2(cx, baseY - h * 0.5), float2(barW * 0.5, h * 0.5), min(radius, h * 0.5));
-    float inside = smoothstep(aa, -aa, sd);
-    float t = saturate((baseY - px.y) / maxH);             // 0 at base, 1 at full height
-    float3 col = lerp(eqLo, eqHi, t);
-    float bodyA = (0.38 + 0.4 * t) * inside;
-    // Inner sheen: a soft highlight down the left third, like light on glass.
-    float sheen = smoothstep(0.0, 0.5, 1.0 - abs((px.x - (cx - barW * 0.18)) / (barW * 0.25)));
-    float3 body = col * (0.85 + 0.35 * sheen) * (1.0 + 0.5 * eqBeat);
-    rgb += body * bodyA;
-    alpha += bodyA;
-
-    // --- Rim: thin bright edge ---
-    float rim = smoothstep(1.5 * scale, 0.0, abs(sd)) * (0.35 + 0.65 * t);
-    rgb += lerp(col, 1.0.xxx, 0.5) * rim * 0.8;
-
-    // --- Glow around the bar (additive) ---
-    float glow = exp(-max(sd, 0.0) / (7.0 * scale)) * (1.0 - inside) * (0.15 + 0.35 * v) * (1.0 + eqBeat);
-    rgb += col * glow * 0.45;
-
-    // --- Peak cap: small floating pill that falls after the bar drops ---
-    float peakY = baseY - max(PeakValue(b) * maxH, h) - 7.0 * scale;
-    float sdCap = SdRoundBox(px - float2(cx, peakY), float2(barW * 0.5, 2.0 * scale), 2.0 * scale);
-    float cap = smoothstep(aa, -aa, sdCap);
-    float3 capCol = lerp(eqHi, 1.0.xxx, 0.55);
-    rgb = lerp(rgb, capCol, cap * 0.95);
-    alpha = max(alpha, cap * 0.95);
-    rgb += capCol * exp(-max(sdCap, 0.0) / (4.0 * scale)) * (1.0 - cap) * 0.25;
-
-    // --- Reflection under the baseline ---
-    if (px.y > baseY) {
-        float depth = px.y - baseY;
-        float2 mirrored = float2(px.x, baseY - depth);
-        float sdR = SdRoundBox(mirrored - float2(cx, baseY - h * 0.5), float2(barW * 0.5, h * 0.5), min(radius, h * 0.5));
-        float fade = saturate(1.0 - depth / (40.0 * scale)) * 0.22;
-        float r = smoothstep(aa, -aa, sdR) * fade;
-        rgb += col * r;
-        alpha += r * 0.5;
+    // --- Reflection: mirrored below the baseline, faded and scanlined ---
+    float depth = px.y - L.baseY;
+    if (depth > 0.0) {
+        float4 refl = Columns(float2(px.x, L.baseY - depth * 1.6), L);
+        float fade = saturate(1.0 - depth / (34.0 * L.scale)) * 0.22;
+        rgb += refl.rgb * fade;
+        alpha += refl.a * fade * 0.5;
     }
 
-    // --- Baseline: a fine glowing line across the bar area ---
-    float lineFade = smoothstep(0.0, 0.08, i.uv.x) * smoothstep(1.0, 0.92, i.uv.x);
-    float baseline = exp(-abs(px.y - baseY - 1.5 * scale) / (1.2 * scale)) * lineFade;
-    rgb += lerp(eqLo, eqHi, 0.5) * baseline * (0.35 + 0.25 * eqBeat);
+    // --- CRT feel: scanlines, a scan band rising through the bars, subtle flicker ---
+    rgb *= 0.78 + 0.22 * step(0.5, frac(px.y / (3.0 * L.scale)));
+    float scanY = L.baseY - frac(eqTime * 0.45) * (L.maxH + 60.0 * L.scale);
+    rgb *= 1.0 + 0.6 * exp(-pow((px.y - scanY) / (5.0 * L.scale), 2.0));
 
-    return float4(rgb, saturate(alpha)) * eqOpacity;
+    // --- HUD: baseline, tick marks every 4 columns, corner brackets ---
+    float3 hud = float3(0.0, 0.9, 1.0);
+    float lineY = L.baseY + 2.0 * L.scale;
+    float left = L.marginX - 14.0 * L.scale, right = L.marginX + L.areaW + 14.0 * L.scale;
+    float onSpan = step(left, px.x) * step(px.x, right);
+    float baseLine = exp(-abs(px.y - lineY) / (0.8 * L.scale)) * onSpan;
+    float tickX = frac((px.x - L.marginX) / (L.slot * 4.0) + 0.5 / 4.0);
+    float tick = step(abs(tickX - 0.5) * L.slot * 4.0, 0.8 * L.scale) * step(lineY, px.y) * step(px.y, lineY + 7.0 * L.scale) * onSpan;
+    // Brackets: short vertical strokes rising from each end, with an angled cut.
+    float bracketH = 26.0 * L.scale;
+    float nearEnd = min(abs(px.x - left), abs(px.x - right));
+    float bracket = step(nearEnd, 1.2 * L.scale) * step(lineY - bracketH, px.y) * step(px.y, lineY);
+    float cap = step(abs(px.y - (lineY - bracketH)), 1.0 * L.scale) *
+                step(min(px.x - left, right - px.x), 10.0 * L.scale) * onSpan;
+    float hudA = saturate(baseLine * 0.8 + tick * 0.6 + bracket + cap) * (0.55 + 0.45 * eqBeat);
+    rgb += hud * hudA;
+    alpha = max(alpha, hudA * 0.6);
+
+    float flicker = 0.95 + 0.05 * Hash33(int3((int)(eqTime * 50.0), 7, 7)).x;
+    return float4(rgb * flicker, saturate(alpha)) * eqOpacity;
 }
