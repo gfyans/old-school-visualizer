@@ -1,10 +1,10 @@
 #include "common.hlsli"
 
-// Neon Grid: a cyberpunk flight over a wireframe landscape built from the music.
-// Each terrain row is one moment's spectrum (bass beside the road, treble further
-// out), pushed in at the horizon and scrolling towards the camera, so the song
-// literally forms the mountains. Above: a striped sun behind a neon city skyline.
-// Rendering: per-pixel heightfield raymarch, analytic anti-aliased grid lines.
+// Neon Grid: a synthwave night drive. A wet four-lane road under rushing neon gates,
+// flat neon grid either side, low-poly wireframe mountains built from the music
+// (each terrain row is one moment's spectrum, entering at the horizon), a dense
+// skyline sitting on the horizon and a big striped sun in the middle.
+// Two-tone throughout: colour A on the left, colour B on the right.
 
 cbuffer Neon : register(b2) {   // matches NeonConstants in NeonGridVisualizer.cpp
     float travel;      float camHeight;   float pitch;       float roll;
@@ -13,170 +13,296 @@ cbuffer Neon : register(b2) {   // matches NeonConstants in NeonGridVisualizer.c
     float sunRadius;   float roadLights;  float treble;      float horizonGlow;
     float3 skyTop;     float flash;
     float3 skyHorizon; float sunStripes;
-    float3 sunTop;     float pulseZ;      // distance of the beat ring travelling towards us
-    float3 sunBottom;  float pad1;
-    float3 gridA;      float pad2;        // lines running into the distance
-    float3 gridB;      float pad3;        // lines across
-    float3 groundCol;  float pad4;
+    float3 sunTop;     float pulseZ;      // distance of the beat wave travelling towards us
+    float3 sunBottom;  float gateGlow;
+    float3 gridA;      float bass;        // left-hand neon
+    float3 gridB;      float gateSpacing; // right-hand neon
+    float3 groundCol;  float neonPad;
 };
 
 Texture2D<float> History : register(t0);   // 64 bands x 128 rows (rows = distance)
-SamplerState Wrap : register(s0);
 
-static const float kRoad = 1.6;        // half-width of the road
-static const float kFlat = 4.5;        // flat neon grid either side of the road, out to here
-static const float kSideWidth = 26.0;  // terrain width each side: treble near, bass far
+static const float kRoad = 2.4;        // road half-width (four lanes)
+static const float kFlat = 6.5;        // flat neon grid out to here; mountains beyond
+static const float kSideWidth = 24.0;  // mountain range width: treble near, bass far out
 static const int kRows = 128;
+static const float kGateHalfW = 3.0;
+static const float kGateH = 3.4;
+#define kTerrainFar (farDist * 2.0)    // mountains are drawn this far (rows beyond farDist are older music)
 
-float Spectrum2D(float band01, float z) {
-    float row = (z - farDist) / rowSpacing;   // row k sits at k*spacing + farDist
-    return History.SampleLevel(Wrap, float2(band01 * (63.0 / 64.0) + 0.5 / 64.0, (row + 0.5) / kRows), 0);
-}
+float3 SideColour(float x) { return lerp(gridA, gridB, smoothstep(-1.0, 1.0, x)); }
+float PixelSize(float t) { return t * 2.0 * tanHalfFov / iResolution.y; }   // world size of a pixel at distance t
 
-float Height(float x, float zWorld) {
-    float ax = abs(x);
+// ---------------------------------------------------------------- terrain (low-poly mesh)
+
+// Height of a mesh vertex on the integer grid. Mountains only beyond the flat zone.
+float VertexHeight(int ix, int iz) {
+    float ax = abs((float)ix);
     float side = smoothstep(kFlat, kFlat + 3.0, ax);
     if (side <= 0.0) return 0.0;
-    float d = saturate((ax - kFlat) / kSideWidth);   // 0 near the road .. 1 far out
-    // Treble makes low ridges near the road; bass raises the big mountains far out.
-    // Left and right read slightly different moments so the valley isn't a mirror image.
-    float s = Spectrum2D(1.0 - d, zWorld + (x < 0.0 ? 0.5 : 0.0));
-    float hills = 0.5 + 0.5 * sin(x * 0.45 + zWorld * 0.13) * sin(zWorld * 0.31 - x * 0.2);
-    return maxHeight * side * (0.08 * hills + pow(saturate(s), 1.4) * (0.15 + 1.1 * d * d));
+    float d = saturate((ax - kFlat) / kSideWidth);              // 0 near the road .. 1 far out
+    int band = (int)((1.0 - d) * 63.0 + 0.5);                  // treble near, bass far
+    int zi = iz + (ix < 0 ? 1 : 0);                             // left/right read different moments
+    int row = (int)((uint)(zi - (int)farDist + 1024) & (uint)(kRows - 1));   // row k sits at k + farDist
+    float s = History.Load(int3(band, row, 0));
+    float jitter = Hash33(int3(ix, iz & 1023, 99)).x;          // low-poly irregularity
+    return maxHeight * side * ((0.08 + 0.22 * jitter) * (0.4 + d) + pow(saturate(s), 1.4) * (0.15 + 1.1 * d * d));
 }
 
-float Line(float coord, float width) {   // distance to the nearest integer line -> intensity
-    float d = abs(frac(coord + 0.5) - 0.5);
-    return smoothstep(width, 0.0, d) + 0.35 * exp(-d / (width * 3.0));
+// Piecewise-linear over triangles (each grid cell split along its diagonal): a real mesh.
+float Height(float x, float z) {
+    if (abs(x) < kFlat - 1.0) return 0.0;
+    int ix = (int)floor(x), iz = (int)floor(z);
+    float2 f = float2(x - ix, z - iz);
+    float v00 = VertexHeight(ix, iz), v10 = VertexHeight(ix + 1, iz);
+    float v01 = VertexHeight(ix, iz + 1), v11 = VertexHeight(ix + 1, iz + 1);
+    return (f.x + f.y < 1.0) ? v00 + (v10 - v00) * f.x + (v01 - v00) * f.y
+                             : v11 + (v01 - v11) * (1.0 - f.x) + (v10 - v11) * (1.0 - f.y);
 }
 
-float3 Sky(float3 rd, float2 pix) {
-    float elev = rd.y;
-    float3 col = lerp(skyHorizon, skyTop, saturate(elev * 2.2));
-    col += skyHorizon * horizonGlow * exp(-abs(elev) * 18.0);
+float3 FacetNormal(float x, float z) {
+    int ix = (int)floor(x), iz = (int)floor(z);
+    float2 f = float2(x - ix, z - iz);
+    float v00 = VertexHeight(ix, iz), v10 = VertexHeight(ix + 1, iz);
+    float v01 = VertexHeight(ix, iz + 1), v11 = VertexHeight(ix + 1, iz + 1);
+    float3 a, b;
+    if (f.x + f.y < 1.0) { a = float3(1, v10 - v00, 0); b = float3(0, v01 - v00, 1); }
+    else                 { a = float3(-1, v01 - v11, 0); b = float3(0, v10 - v11, -1); }
+    float3 n = normalize(cross(b, a));
+    return n.y < 0.0 ? -n : n;
+}
 
-    // Stars in the upper sky.
-    if (elev > 0.08) {
-        float2 q = rd.xy / max(rd.z, 0.05) * 90.0;
-        int3 cell = int3(floor(q), 3);
-        float3 h = Hash33(cell + 5000);
-        float d = length(frac(q) - (0.2 + 0.6 * h.yz));
-        float tw = 0.6 + 0.4 * sin(iTime * (2.0 + 5.0 * h.y) + h.z * 40.0);
-        col += step(0.93, h.x) * smoothstep(0.12, 0.0, d) * tw * (0.5 + treble) * saturate((elev - 0.08) * 6.0);
+// ---------------------------------------------------------------- neon gates
+
+// Glow of the gates along a ray (also used for reflections in the wet road).
+float3 Gates(float3 o, float3 d, float tMax, float spread) {
+    float3 acc = 0;
+    if (d.z <= 1e-3) return acc;
+    float phase = fmod(travel, gateSpacing);
+    [unroll] for (int k = 1; k <= 7; ++k) {
+        float zk = k * gateSpacing - phase;          // gate distance ahead of the camera
+        float tg = (zk - o.z) / d.z;
+        if (tg <= 0.0 || tg > tMax) continue;
+        float3 q = o + d * tg;
+        float ax = abs(q.x);
+        float dPost = length(float2(ax - kGateHalfW, max(q.y - kGateH, 0.0) + max(-q.y, 0.0)));
+        float dTop = length(float2(max(ax - kGateHalfW, 0.0), q.y - kGateH));
+        float dd = min(dPost, dTop);
+        float core = smoothstep(PixelSize(tg) * 1.5 + 0.025, 0.0, dd);
+        float halo = exp(-dd / (0.14 + spread)) * 0.45;
+        float fade = 1.0 - smoothstep(farDist * 0.35, farDist * 0.9, tg);
+        float wave = 1.0 + 2.5 * pulse * exp(-pow(zk - pulseZ, 2.0) * 0.04);   // flashes as the beat passes
+        acc += SideColour(q.x / kGateHalfW) * (core * 1.6 + halo) * fade * gateGlow * wave;
     }
+    return acc;
+}
 
-    // Sun: gradient disc, horizontal gaps in its lower half that scroll downwards.
-    float2 s = float2(rd.x / rd.z, rd.y / rd.z) - float2(0.0, 0.13);
-    float r = length(s);
-    if (r < sunRadius) {
-        float v = s.y / sunRadius;   // -1 bottom .. 1 top
-        float3 sun = lerp(sunBottom, sunTop, saturate(v * 0.5 + 0.5));
-        float gapZone = saturate(-v * 1.1 + 0.1);                    // from just above the middle down
-        float stripe = frac(v * sunStripes - iTime * 0.25);
-        float gap = step(stripe, 0.08 + gapZone * 0.5);              // gaps widen towards the bottom
-        gap *= step(v, 0.1);
-        col = lerp(col, sun * 1.4, 1.0 - gap);
-    }
-    col += lerp(sunBottom, sunTop, 0.4) * exp(-max(r - sunRadius, 0.0) * 9.0) * 0.35 * (1.0 + 0.4 * pulse);
+// ---------------------------------------------------------------- sky, sun, city
 
-    // City skyline in front of the sun.
-    float sx = rd.x / rd.z;
-    float sy = rd.y / rd.z;
-    float colW = 0.035;
-    float id = floor(sx / colW);
-    float3 hb = Hash33(int3((int)id, 11, 7));
-    float bh = 0.012 + 0.09 * hb.x * hb.x * (1.0 - smoothstep(0.3, 1.4, abs(sx)));
-    if (sy < bh && sy > -0.01) {
-        float3 building = skyTop * 0.6;
-        // Windows: a sparse grid of lit cells.
-        int3 w = int3((int)floor(sx / (colW * 0.18)), (int)floor(sy / 0.006), 23);
-        float3 hw = Hash33(w);
-        building += lerp(gridB, sunTop, hw.y) * step(0.82, hw.x) * 0.6;
-        col = building;
-        // Neon edge along the rooftop.
-        col += gridA * exp(-(bh - sy) * 900.0) * 0.8;
+float3 City(float sx, float sy, float3 col) {
+    [unroll] for (int layer = 0; layer < 2; ++layer) {
+        float colW = layer == 0 ? 0.016 : 0.045;
+        float offset = layer * 13.7;
+        float u = sx / colW + offset;
+        int id = (int)floor(u);
+        float local = u - floor(u);
+        float3 h = Hash33(int3(id, 31 + layer * 17, 5));
+        // Lower in the middle so the sun shows; towers climb towards the sides.
+        float centreDip = 0.35 + 0.65 * smoothstep(0.05, 0.45, abs(sx));
+        float height = (layer == 0 ? 0.05 + 0.12 * h.x * h.x : 0.03 + 0.27 * h.x * h.x) * centreDip;
+        bool gapColumn = layer == 1 && h.y < 0.25;  // gaps in the front row reveal the back row
+        // Stepped setbacks: the top part of taller buildings is narrower.
+        float inset = 0.04 + (sy > height * 0.72 && h.x > 0.45 ? 0.2 : 0.0) + (sy > height * 0.9 && h.x > 0.7 ? 0.12 : 0.0);
+        bool inside = !gapColumn && local > inset && local < 1.0 - inset && sy < height;
+        if (inside) {
+            float3 body = layer == 0 ? lerp(skyTop, skyHorizon, 0.35) * 0.55 : skyTop * 0.55;
+            // Windows: a grid of cells, some lit.
+            float cols = layer == 0 ? 3.0 : 5.0, rows = layer == 0 ? 260.0 : 170.0;
+            float2 w = float2(local * cols, sy * rows);
+            float3 hw = Hash33(int3(id * 37 + (int)floor(w.x), (int)floor(w.y), 7 + layer));
+            float2 fw = frac(w);
+            float lit = step(0.28, fw.x) * step(fw.x, 0.72) * step(0.3, fw.y) * step(fw.y, 0.78) * step(0.58, hw.x);
+            float3 wc = lerp(float3(1.0, 0.82, 0.55), lerp(gridA, gridB, hw.y), 0.55 * hw.z);
+            body += wc * lit * (layer == 0 ? 0.35 : 0.85);
+            // Neon roof trim and the odd vertical sign.
+            body += SideColour(sx * 3.0) * exp(-(height - sy) * (layer == 0 ? 1600.0 : 700.0)) * (layer == 0 ? 0.35 : 1.0);
+            float sign = step(0.82, h.z) * exp(-abs(local - 0.5) * 50.0) * step(height * 0.35, sy) * step(sy, height * 0.85);
+            body += lerp(gridA, gridB, h.y) * sign * (layer == 0 ? 0.5 : 1.3);
+            // The city is the farthest thing in the scene, so it carries the most haze (that's what
+            // puts it visibly *behind* the mountains), and its base dissolves into the horizon glow.
+            float3 haze = skyHorizon * (1.0 + 0.8 * horizonGlow);
+            body = lerp(body, haze, layer == 0 ? 0.55 : 0.35);
+            col = lerp(haze, body, smoothstep(-0.002, layer == 0 ? 0.03 : 0.018, sy));
+        }
+        // Blinking antenna lights on the tallest towers.
+        if (layer == 1 && h.x > 0.8) {
+            float2 a = float2((local - 0.5) * colW, sy - height - 0.008);
+            float blink = step(0.5, frac(iTime * 0.7 + h.y));
+            col += float3(1.0, 0.15, 0.1) * smoothstep(0.0025, 0.0, length(a)) * blink * 1.5;
+        }
     }
     return col;
 }
+
+float3 Sky(float3 rd) {
+    float sx = rd.x / max(rd.z, 0.05), sy = rd.y / max(rd.z, 0.05);
+    float3 col = lerp(skyHorizon, skyTop, saturate(rd.y * 2.4));
+    col += skyHorizon * horizonGlow * 0.8 * exp(-abs(rd.y) * 14.0);
+
+    // Stars.
+    if (rd.y > 0.1) {
+        float2 q = float2(sx, sy) * 90.0;
+        float3 h = Hash33(int3(floor(q), 3) + 5000);
+        float d = length(frac(q) - (0.2 + 0.6 * h.yz));
+        float tw = 0.6 + 0.4 * sin(iTime * (2.0 + 5.0 * h.y) + h.z * 40.0);
+        col += step(0.93, h.x) * smoothstep(0.12, 0.0, d) * tw * (0.5 + treble) * saturate((rd.y - 0.1) * 6.0);
+    }
+
+    // The sun: centred, hot-pink to gold, stripes scrolling down its lower half, big halo.
+    float2 s = float2(sx, sy) - float2(0.0, 0.11);
+    float r = length(s);
+    col += lerp(sunBottom, sunTop, 0.45) * exp(-max(r - sunRadius, 0.0) * 5.5) * (0.5 + 0.35 * bass);
+    if (r < sunRadius) {
+        float v = s.y / sunRadius;                                      // -1 bottom .. 1 top
+        // Saturated gradient: hot colour at the bottom climbing to a bright top.
+        // (Its lower part is below the horizon, so the gradient spans the visible part.)
+        float3 sun = lerp(sunBottom, sunTop, smoothstep(-0.25, 0.85, v));
+        sun *= 0.85 + 0.25 * smoothstep(0.6, 1.0, r / sunRadius);       // slightly brighter rim
+        float zone = saturate((0.45 - v) * 1.2);                        // stripes from above the middle down
+        float stripe = frac(v * sunStripes - iTime * 0.3);
+        float gap = step(stripe, 0.1 + zone * 0.5) * step(v, 0.45);
+        col = lerp(col, sun, 1.0 - gap);
+    }
+    // Horizon flare: a thin hot line across the sky where the sun meets the land.
+    col += lerp(sunBottom, sunTop, 0.3) * exp(-abs(sy) * 350.0) * exp(-abs(sx) * 1.2) * 0.7;
+
+    if (sy > -0.003) col = City(sx, sy, col);
+    return col;
+}
+
+// ---------------------------------------------------------------- main
 
 float4 main(VSOut i) : SV_Target {
     float aspect = iResolution.x / iResolution.y;
     float2 sp = float2((i.uv.x * 2.0 - 1.0) * aspect, 1.0 - i.uv.y * 2.0);
 
-    // Drop glitch: some horizontal slices jump sideways for a moment.
-    float slice = floor(i.uv.y * 40.0);
-    float3 g = Hash33(int3((int)slice, (int)(glitchSeed * 1000.0), 77));
+    // Drop glitch: horizontal slices jump sideways for a moment.
+    float3 g = Hash33(int3((int)floor(i.uv.y * 40.0), (int)(glitchSeed * 1000.0), 77));
     sp.x += step(1.0 - 0.5 * glitch, g.x) * (g.y - 0.5) * 0.3 * glitch;
 
-    // Camera: looking down the road, slight pitch and roll.
     float cr = cos(roll), sr = sin(roll);
     sp = float2(cr * sp.x - sr * sp.y, sr * sp.x + cr * sp.y);
-    float cp = cos(pitch), spch = sin(pitch);
-    float3 fwd = float3(0.0, spch, cp);
-    float3 up = float3(0.0, cp, -spch);
-    float3 rd = normalize(fwd + (sp.x * float3(1, 0, 0) + sp.y * up) * tanHalfFov);
+    float cp = cos(pitch), sn = sin(pitch);
+    float3 up = float3(0.0, cp, -sn);
+    float3 rd = normalize(float3(0.0, sn, cp) + (sp.x * float3(1, 0, 0) + sp.y * up) * tanHalfFov);
     float3 ro = float3(0.0, camHeight, 0.0);
 
-    float3 col = Sky(rd, i.pos.xy);
+    float3 fogCol = skyHorizon * (1.0 + 0.8 * horizonGlow);   // equals the sky right at the horizon
+    float3 col = Sky(rd);
+    float tScene = farDist;
 
-    // --- Heightfield raymarch (z relative to the camera; world z = travel + z) ---
-    float t = 0.3;
-    bool hit = false;
-    float prevT = t;
-    [loop] for (int s = 0; s < 90; ++s) {
-        float3 p = ro + rd * t;
-        float h = Height(p.x, travel + p.z);
-        float gap = p.y - h;
-        if (gap < 0.0) { hit = true; break; }
-        prevT = t;
-        t += clamp(gap * 0.55, 0.04, 1.5);
-        if (t > farDist) break;
-    }
-    if (hit) {
-        // Refine between the last point above and the first below the surface.
-        float a = prevT, b = t;
-        [unroll] for (int k = 0; k < 5; ++k) {
-            float m = 0.5 * (a + b);
-            float3 p = ro + rd * m;
-            if (p.y < Height(p.x, travel + p.z)) b = m; else a = m;
+    // --- Terrain: exact plane hits over the flat zone, careful steps over the mountains ---
+    if (rd.y < 0.3) {
+        float t = 0.2, prevT = 0.2;
+        bool hit = false, flat = false;
+        [loop] for (int s = 0; s < 180; ++s) {
+            float3 p = ro + rd * t;
+            if (abs(p.x) < kFlat - 1.0) {
+                // Nothing but flat ground here: jump straight to it, or to where the ray leaves the zone.
+                float toPlane = rd.y < 0.0 ? p.y / -rd.y : 1e9;
+                float toExit = (kFlat - 1.0 - abs(p.x)) / max(abs(rd.x), 1e-4);
+                if (toPlane <= toExit) { t += toPlane; hit = true; flat = true; break; }
+                prevT = t;
+                t += toExit + 0.01;
+            } else {
+                float gap = p.y - Height(p.x, travel + p.z);
+                if (gap < 0.0) { hit = true; break; }
+                prevT = t;
+                // Conservative for steep slopes (no holes), coarser far away where a pixel is bigger.
+                t += clamp(gap * 0.35, 0.015 + t * 0.001, 0.6 + t * 0.012);
+            }
+            if (t > kTerrainFar) break;
         }
-        t = b;
-        float3 p = ro + rd * t;
-        float zWorld = travel + p.z;
-        float h = Height(p.x, zWorld);
-
-        // Line width grows with distance (about one pixel), so lines stay crisp but don't alias.
-        float width = t * (2.0 * tanHalfFov / iResolution.y) * 1.3 + 0.004;
-        float ax = abs(p.x);
-        float3 surface = groundCol * (0.6 + 2.5 * h / maxHeight);
-        float alongLines = Line(p.x, width);                    // run into the distance
-        float acrossLines = Line(zWorld / rowSpacing, width / rowSpacing);
-        float3 lines = gridA * alongLines + gridB * acrossLines * (1.0 + 1.2 * pulse);
-
-        // Beat ring: a bright band rushing towards the camera on each beat.
-        float ring = exp(-abs(p.z - pulseZ) * 1.5) * pulse;
-        lines += gridB * ring * 2.0;
-
-        if (ax < kRoad) {
-            // The road: dark, dashed centre line, neon edges, strobing edge lights.
-            surface = groundCol * 0.4;
-            lines = 0;
-            float dash = step(frac(zWorld * 0.25), 0.5) * smoothstep(0.06, 0.03, ax);
-            float edge = exp(-abs(ax - kRoad + 0.05) / (width * 1.5));
-            float lightsOn = step(frac(zWorld * 0.25 + 0.125), 0.12) * exp(-abs(ax - kRoad + 0.15) * 20.0);
-            lines = float3(0.9, 0.9, 1.0) * dash * 0.6 + gridA * edge * 1.2 + sunTop * lightsOn * roadLights * 3.0;
+        // All terrain is at or above ground level, so a downward ray that got this far without
+        // a hit slipped between samples (or ran out of steps). Land it where it meets the
+        // ground: never a hole showing the sky or city through the mountains.
+        if (!hit && rd.y < 0.0) {
+            float tPlane = ro.y / -rd.y;
+            if (tPlane < kTerrainFar) { t = tPlane; hit = true; flat = true; }
         }
-        // A faint sheen of the horizon glow on the ground, strongest far away.
-        surface += skyHorizon * 0.18 * smoothstep(5.0, farDist, t) * horizonGlow;
-        float3 ground = surface + lines;
-        float fog = smoothstep(farDist * 0.35, farDist * 0.95, t);
-        col = lerp(ground, skyHorizon * (0.6 + horizonGlow), fog);
+        if (hit && !flat) {
+            float a = prevT, b = t;
+            [unroll] for (int k = 0; k < 6; ++k) {
+                float m = 0.5 * (a + b);
+                float3 p = ro + rd * m;
+                if (p.y < Height(p.x, travel + p.z)) b = m; else a = m;
+            }
+            t = b;
+        }
+
+        if (hit && t < kTerrainFar) {
+            tScene = t;
+            float3 p = ro + rd * t;
+            float zW = travel + p.z;
+            float ax = abs(p.x);
+            float width = PixelSize(t) * 1.3 + 0.004;
+            float3 side = SideColour(p.x);
+            float3 shade;
+
+            if (ax < kRoad) {
+                // Wet road: dark gloss, dashed lanes, neon edges, and reflections of the neon.
+                shade = groundCol * 0.6 + skyHorizon * 0.05;
+                float lane = min(ax, abs(ax - kRoad * 0.5));
+                float dash = step(frac(zW * 0.18), 0.45);
+                shade += float3(0.85, 0.85, 1.0) * smoothstep(0.045 + width, 0.02, lane) * dash * 0.7;
+                float3 rr = float3(rd.x, -rd.y, rd.z);
+                float wet = 0.35 * (1.0 - smoothstep(10.0, farDist * 0.8, t));
+                shade += Gates(p, rr, farDist, 0.25) * wet;
+                float2 rs = float2(rr.x / rr.z, rr.y / rr.z) - float2(0.0, 0.11);
+                shade += lerp(sunBottom, sunTop, 0.4) * exp(-max(length(rs) - sunRadius, 0.0) * 5.0) * exp(-abs(rs.x) * 4.0) * wet * 0.8;
+                float edgeD = abs(ax - kRoad + 0.06);
+                shade += side * (smoothstep(0.05 + width, 0.02, edgeD) * 1.8 + exp(-edgeD / 0.25) * 0.35) * (1.0 + 1.2 * roadLights);
+            } else if (ax < kFlat) {
+                // Flat neon grid: bright squares.
+                float lx = abs(frac(p.x + 0.5) - 0.5), lz = abs(frac(zW + 0.5) - 0.5);
+                float w2 = width + 0.012;   // a touch thicker: these lines should really glow
+                float lines = smoothstep(w2, 0.0, lx) + smoothstep(w2, 0.0, lz) * (1.0 + pulse);
+                float halo = exp(-min(lx, lz) / (w2 * 5.0)) * 0.45;
+                shade = groundCol + side * (lines * 1.8 + halo);
+            } else {
+                // Mountains: flat-shaded low-poly facets with glowing wireframe edges.
+                float3 n = FacetNormal(p.x, zW);
+                float facet = 0.25 + 0.75 * saturate(dot(n, normalize(float3(-0.2 * sign(p.x), 0.6, 1.0))));
+                float h01 = saturate(p.y / maxHeight);
+                float2 f = float2(frac(p.x), frac(zW));
+                float edgeD = min(min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)), abs(f.x + f.y - 1.0) * 0.7071);
+                float edge = smoothstep(width, 0.0, edgeD) + exp(-edgeD / (width * 3.0)) * 0.25;
+                shade = groundCol * (1.0 + 3.0 * facet) + side * edge * (0.7 + 1.3 * h01);
+            }
+            // Capped fog: even the farthest ridges stay solid silhouettes in front of the city.
+            float fog = smoothstep(farDist * 0.35, kTerrainFar, t) * 0.62;
+            col = lerp(shade, fogCol, fog);
+        } else {
+            // The ray ran out of terrain without hitting anything. Out at the sides, a ray that
+            // skims between ridges would really hit mountains further away, so fill a hazy
+            // distant range there: otherwise the city behind shows through the gaps.
+            float sx = rd.x / max(rd.z, 0.05), sy = rd.y / max(rd.z, 0.05);
+            float sideMask = smoothstep(0.05, 0.11, abs(sx));    // mountains start beyond the flat zone
+            float ridge = (0.018 + 0.016 * (0.5 + 0.5 * sin(sx * 23.0) * sin(sx * 9.0 + 1.3))) * sideMask;
+            if (sy < ridge) {
+                float3 farMountain = groundCol * 3.0 + SideColour(sx) * 0.12;
+                col = lerp(farMountain, fogCol, 0.62);           // same haze as the farthest terrain
+            } else if (rd.y < 0.0) {
+                col = fogCol;   // flat ground beyond the terrain's range, all the way to the horizon
+            }
+        }
     }
 
-    col += lerp(gridA, float3(1, 1, 1), 0.5) * flash * 0.35;
-    col *= 0.92 + 0.08 * step(0.5, frac(i.pos.y * 0.5));      // faint scanlines
+    col += Gates(ro, rd, tScene, 0.0);
+    col += lerp(gridA, gridB, 0.5) * flash * 0.3;
+    col *= 0.93 + 0.07 * step(0.5, frac(i.pos.y * 0.5));    // faint scanlines
     float2 v = i.uv - 0.5;
-    col *= 1.0 - dot(v, v) * 0.6;                              // vignette
-    col = 1.0 - exp(-col * 1.25);                              // soft clip
+    col *= 1.0 - dot(v, v) * 0.55;                           // vignette
+    col = 1.0 - exp(-col * 1.2);                             // soft clip
     return float4(col, 1);
 }

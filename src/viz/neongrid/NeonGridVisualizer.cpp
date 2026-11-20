@@ -21,26 +21,27 @@ struct NeonConstants {   // matches cbuffer Neon in neongrid_ps.hlsl
     float skyTop[3];     float flash;
     float skyHorizon[3]; float sunStripes;
     float sunTop[3];     float pulseZ;
-    float sunBottom[3];  float pad1;
-    float gridA[3];      float pad2;
-    float gridB[3];      float pad3;
-    float ground[3];     float pad4;
+    float sunBottom[3];  float gateGlow;
+    float gridA[3];      float bass;
+    float gridB[3];      float gateSpacing;
+    float ground[3];     float pad;
 };
 static_assert(sizeof(NeonConstants) % 16 == 0);
 static_assert(sizeof(NeonConstants) <= sizeof(float) * 48);
 
 struct NamedScheme { const wchar_t* name; NeonGridVisualizer::Scheme s; };
 const NamedScheme kSchemes[] = {
-    { L"Outrun",     { { 0.02f, 0.00f, 0.06f }, { 0.50f, 0.05f, 0.40f }, { 1.00f, 0.90f, 0.30f }, { 1.00f, 0.10f, 0.50f },
-                       { 1.00f, 0.15f, 0.75f }, { 0.10f, 0.90f, 1.00f }, { 0.04f, 0.00f, 0.08f } } },
-    { L"Cyber Teal", { { 0.00f, 0.02f, 0.05f }, { 0.00f, 0.35f, 0.45f }, { 0.60f, 1.00f, 0.90f }, { 0.00f, 0.60f, 0.80f },
-                       { 0.00f, 1.00f, 0.80f }, { 1.00f, 0.20f, 0.60f }, { 0.00f, 0.03f, 0.05f } } },
-    { L"Blade",      { { 0.03f, 0.01f, 0.00f }, { 0.55f, 0.18f, 0.02f }, { 1.00f, 0.80f, 0.30f }, { 1.00f, 0.35f, 0.05f },
-                       { 1.00f, 0.45f, 0.10f }, { 0.20f, 0.80f, 1.00f }, { 0.05f, 0.02f, 0.00f } } },
-    { L"Matrix",     { { 0.00f, 0.02f, 0.00f }, { 0.00f, 0.25f, 0.08f }, { 0.70f, 1.00f, 0.60f }, { 0.10f, 0.80f, 0.20f },
-                       { 0.10f, 1.00f, 0.30f }, { 0.60f, 1.00f, 0.60f }, { 0.00f, 0.04f, 0.01f } } },
-    { L"Ice",        { { 0.00f, 0.00f, 0.05f }, { 0.10f, 0.20f, 0.60f }, { 0.90f, 0.95f, 1.00f }, { 0.40f, 0.60f, 1.00f },
-                       { 0.40f, 0.70f, 1.00f }, { 1.00f, 1.00f, 1.00f }, { 0.00f, 0.01f, 0.05f } } },
+    // sky top, sky horizon, sun top, sun bottom, left neon, right neon, ground
+    { L"Outrun",     { { 0.03f, 0.00f, 0.08f }, { 0.42f, 0.06f, 0.45f }, { 1.00f, 0.92f, 0.40f }, { 1.00f, 0.12f, 0.60f },
+                       { 1.00f, 0.20f, 0.85f }, { 0.10f, 0.85f, 1.00f }, { 0.035f, 0.01f, 0.06f } } },
+    { L"Cyber Teal", { { 0.00f, 0.02f, 0.06f }, { 0.02f, 0.25f, 0.40f }, { 0.70f, 1.00f, 0.95f }, { 0.10f, 0.50f, 1.00f },
+                       { 0.00f, 1.00f, 0.85f }, { 1.00f, 0.25f, 0.70f }, { 0.00f, 0.03f, 0.05f } } },
+    { L"Blade",      { { 0.04f, 0.01f, 0.00f }, { 0.50f, 0.15f, 0.04f }, { 1.00f, 0.85f, 0.40f }, { 1.00f, 0.25f, 0.10f },
+                       { 1.00f, 0.45f, 0.10f }, { 0.15f, 0.80f, 1.00f }, { 0.05f, 0.02f, 0.01f } } },
+    { L"Matrix",     { { 0.00f, 0.02f, 0.00f }, { 0.02f, 0.20f, 0.07f }, { 0.80f, 1.00f, 0.60f }, { 0.10f, 0.70f, 0.25f },
+                       { 0.15f, 1.00f, 0.35f }, { 0.60f, 1.00f, 0.85f }, { 0.00f, 0.035f, 0.01f } } },
+    { L"Midnight",   { { 0.00f, 0.00f, 0.06f }, { 0.12f, 0.15f, 0.55f }, { 1.00f, 0.95f, 0.90f }, { 0.55f, 0.40f, 1.00f },
+                       { 0.60f, 0.40f, 1.00f }, { 0.30f, 0.85f, 1.00f }, { 0.01f, 0.01f, 0.06f } } },
 };
 constexpr int kSchemeCount = static_cast<int>(std::size(kSchemes));
 
@@ -209,13 +210,16 @@ void NeonGridVisualizer::Update(const AudioFeatures& audio, float dt) {
     c.roll = 0.025f * std::sin(m_time * 0.27f);
     c.rowSpacing = kRowSpacing;
     c.farDist = kFarDist;
-    c.maxHeight = 9.0f;
+    c.maxHeight = 5.0f;
     c.tanHalfFov = std::tan(32.0f * 3.14159265f / 180.0f);
     c.pulse = m_pulse;
     c.buildUp = m_buildUp;
     c.glitch = m_glitch;
     c.glitchSeed = m_glitchSeed;
-    c.sunRadius = 0.30f + 0.04f * m_bass;
+    c.sunRadius = 0.34f + 0.03f * m_bass;
+    c.gateGlow = 0.85f + 0.8f * m_buildUp;
+    c.bass = m_bass;
+    c.gateSpacing = 10.0f;
     c.roadLights = m_drums * (0.4f + 0.6f * m_pulse);
     c.treble = m_treble;
     c.horizonGlow = 0.5f + 0.9f * m_buildUp + 0.3f * m_bass;
