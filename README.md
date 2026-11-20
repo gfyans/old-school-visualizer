@@ -4,7 +4,7 @@ A modern take on the Winamp-era music visualiser. A single small `.exe` with no 
 It listens to whatever your PC is playing (Spotify, a browser, games…) and renders it on the GPU.
 
 * **Nebula**: fly through a glowing volumetric gas cloud that reacts to the music.
-* **Neon Grid**: a cyberpunk flight down a neon road under a striped sun. The mountains are built from the music:
+* **Neon Grid**: a synthwave night drive under neon gates, past low-poly mountains and a city skyline, towards a striped sun. The mountains are built from the music:
   each row of terrain is one moment's spectrum, entering at the horizon.
 * **Liquid**: Milkdrop-style feedback. Waveform ink is warped, faded and hue-shifted every frame into
   tunnels, vortices, ripples and kaleidoscopes.
@@ -85,7 +85,7 @@ Measured on an RTX 3080 at 2560×1440 fullscreen:
 * Nebula: about 1.2 ms GPU per frame. It renders at 50% resolution with temporal accumulation (TAA): each frame is
   jittered and blended with the reprojected previous result, which removes raymarch grain and recovers sub-pixel
   detail, so it looks the same as 60% did at about 30% less cost.
-* Neon Grid: about 0.35 ms GPU per frame (75% resolution, for crisp lines).
+* Neon Grid: about 1.7 ms GPU per frame (75% resolution, for crisp lines).
 * Liquid: about 0.06 ms GPU per frame.
 * Spectrum: 0.01 ms GPU per frame.
 * CPU: under 1% of one core in a window, about 3.5% fullscreen with the stats overlay.
