@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <complex>
 #include <cstdint>
 #include <vector>
@@ -19,6 +20,11 @@ public:
         float barPhase = 0.0f;     // 0..1 through the current 4-beat bar
         uint32_t beatIndex = 0;    // increments on every predicted beat
         float confidence = 0.0f;   // 0..1: how periodic / stable the music is
+        // Diagnostics behind the confidence (for tuning tools).
+        float periodicity = 0.0f;  // normalised autocorrelation at the beat period
+        float contrast = 0.0f;     // how sharply the best beat position beats the others
+        float phaseError = 0.0f;   // average |phase correction| per estimate (0 = rock steady)
+        float percussive = 0.0f;   // 0..1: how broadband the onsets are (drums high, piano/pads low)
     };
 
     // All new mono samples since the previous call, in order.
@@ -35,8 +41,7 @@ private:
     void Configure(float sampleRate);
     void ProcessHop();
     void EstimateTempo();
-    // Linear interpolation into a history (default: the full-band onset envelope).
-    float EnvelopeAt(float ticksAgo, const float* envelope = nullptr) const;
+    float EnvelopeAt(float ticksAgo) const;   // linear interpolation into the history
 
     float m_rate = 0.0f;
     int m_hop = 0;
@@ -45,12 +50,13 @@ private:
     std::vector<float> m_input;        // sliding analysis window
     int m_inputFill = 0;               // samples accumulated toward the next hop
     std::vector<std::complex<float>> m_spectrum;
-    std::vector<float> m_prevLogMag;
-    int m_maxBin = 0;
+    static constexpr int kBands = 40;
+    std::array<int, kBands + 1> m_bandEdge{};
+    std::array<float, kBands> m_prevBand{};
+    std::array<float, kBands> m_prevFine{};
+    float m_bandPeak = 0.0f;
 
-    float m_envelope[kEnvelopeSize] = {};      // full-band onsets: tempo
-    float m_lowEnvelope[kEnvelopeSize] = {};   // low-frequency onsets: phase
-    float m_lowMean = 0.0f;
+    float m_envelope[kEnvelopeSize] = {};      // onset strength history
     int m_envWrite = 0;
     uint64_t m_hopCount = 0;
     float m_lastOnset = 0.0f;
@@ -61,6 +67,8 @@ private:
     float m_candidatePeriod = 0.0f;
     int m_candidateVotes = 0;
     float m_rawConfidence = 0.0f;
+    float m_phaseErrorAvg = 0.25f;     // start sceptical
+    float m_broadestJump = 0.0f, m_percussive = 0.0f;
     int m_sinceEstimate = 0;
 
     // Phase-locked oscillator

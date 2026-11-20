@@ -1,4 +1,4 @@
-#include "audio/BeatTracker.h"
+﻿#include "audio/BeatTracker.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,6 +8,13 @@ constexpr float kMinBpm = 65.0f, kMaxBpm = 185.0f;
 constexpr int kTempoWindow = 500;        // 5 s of envelope for autocorrelation
 constexpr int kEstimateEvery = 25;       // re-estimate tempo/phase every 0.25 s
 constexpr int kCombBeats = 8;            // beats looked back over when locating phase
+// Confidence comes mainly from phase consistency (average |phase error| per estimate),
+// calibrated on real recordings with tools/analysis: rhythmic songs well above 0.4,
+// drumless / rubato music below.
+constexpr float kPhaseErrorGood = 0.06f;   // at or below: fully confident
+constexpr float kPhaseErrorBad = 0.20f;    // at or above: no confidence (random is ~0.25)
+constexpr float kPeriodicityFloor = 0.08f; // below this the onsets barely repeat at all
+constexpr float kLatencyTicks = 2.0f;      // onset detection delay, in 10 ms envelope ticks
 
 float Wrap01(float x) { return x - std::floor(x); }
 float WrapHalf(float x) { return x - std::floor(x + 0.5f); }   // to [-0.5, 0.5)
@@ -22,8 +29,19 @@ void BeatTracker::Configure(float sampleRate) {
     m_input.assign(windowSize, 0.0f);
     m_inputFill = 0;
     m_spectrum.assign(windowSize, {});
-    m_maxBin = std::min(windowSize / 2, static_cast<int>(6000.0f * windowSize / sampleRate));
-    m_prevLogMag.assign(m_maxBin + 1, 0.0f);
+    // Log-spaced bands (30 Hz - 11 kHz), each at least one FFT bin wide.
+    const float binHz = sampleRate / windowSize;
+    const float top = std::min(11000.0f, sampleRate * 0.45f);
+    int prevHi = 1;
+    for (int b = 0; b <= kBands; ++b) {
+        const float f = 30.0f * std::pow(top / 30.0f, float(b) / kBands);
+        const int bin = std::clamp(static_cast<int>(f / binHz), 1, windowSize / 2);
+        m_bandEdge[b] = b == 0 ? bin : std::max(bin, prevHi + 1);
+        prevHi = m_bandEdge[b];
+    }
+    m_prevBand.fill(0.0f);
+    m_prevFine.fill(0.0f);
+    m_bandPeak = 0.0f;
 }
 
 void BeatTracker::Process(const float* samples, size_t count, float sampleRate) {
@@ -47,34 +65,50 @@ void BeatTracker::ProcessHop() {
     for (int i = 0; i < n; ++i) m_spectrum[i] = { m_input[(start + i) % n] * m_window[i], 0.0f };
     m_fft.Transform(m_spectrum.data());
 
-    // Log-compressed spectral flux: sum of magnitude increases, with the kick range weighted up.
+    // Onset strength pooled over log-spaced bands (like a mel onset envelope): each band
+    // counts once however many FFT bins it spans, so broadband hats can't swamp the kick,
+    // and a bassline alone can't drag the grid onto the off-beats.
     const float norm = 4.0f / n;
-    const float binHz = m_rate / n;
-    float flux = 0.0f, fluxLow = 0.0f;
-    int lowBins = 0;
-    for (int k = 1; k <= m_maxBin; ++k) {
-        const float logMag = std::log1p(100.0f * std::abs(m_spectrum[k]) * norm);
-        const float d = logMag - m_prevLogMag[k];
-        m_prevLogMag[k] = logMag;
-        const bool low = k * binHz < 200.0f;
-        lowBins += low;
-        if (d > 0.0f) {
-            flux += d * (low ? 2.0f : 1.0f);
-            if (low) fluxLow += d;
-        }
+    float bands[kBands];
+    float loudest = 0.0f;
+    for (int b = 0; b < kBands; ++b) {
+        float sum = 0.0f;
+        for (int k = m_bandEdge[b]; k < m_bandEdge[b + 1]; ++k) sum += std::abs(m_spectrum[k]);
+        bands[b] = sum * norm / (m_bandEdge[b + 1] - m_bandEdge[b]);
+        loudest = std::max(loudest, bands[b]);
     }
-    flux /= m_maxBin;
-    fluxLow /= std::max(lowBins, 1);
+    m_bandPeak = std::max(loudest, m_bandPeak * 0.9995f);   // slow-decaying reference level
+    // Floor at -40 dB below the loudest band: a sound rising out of near-silence (a hat after a
+    // gap) then counts as a bounded jump instead of an enormous one that outweighs the kick.
+    const float floor = 1e-2f * m_bandPeak + 1e-9f;
+    const float fineFloor = 1e-3f * m_bandPeak + 1e-9f;      // finer floor for the percussiveness count
+    float flux = 0.0f;
+    int jumping = 0;
+    for (int b = 0; b < kBands; ++b) {
+        const float logBand = std::log(bands[b] + floor);
+        const float d = logBand - m_prevBand[b];
+        m_prevBand[b] = logBand;
+        if (d > 0.0f) flux += d;   // equal weight: snares and hats mark the beat as much as kicks
+        const float fine = std::log(bands[b] + fineFloor);
+        if (fine - m_prevFine[b] > 0.4f) ++jumping;   // band got ~50% louder in 10 ms
+        m_prevFine[b] = fine;
+    }
+    flux /= kBands;
 
-    // Remove the slowly varying baselines so only onsets remain.
+    // Percussiveness: drum hits make many bands jump at once; tonal notes light up a few.
+    // Take the broadest jump in each 100 ms, averaged over a few seconds.
+    m_broadestJump = std::max(m_broadestJump, float(jumping) / kBands);
+    if (m_hopCount % 10 == 9) {
+        m_percussive += (m_broadestJump - m_percussive) * 0.03f;   // ~3 s
+        m_broadestJump = 0.0f;
+    }
+    m_state.percussive = m_percussive;
+
+    // Remove the slowly varying baseline so only onsets remain.
     m_onsetMean += (flux - m_onsetMean) * 0.01f;   // ~1 s
-    m_lowMean += (fluxLow - m_lowMean) * 0.01f;
     const float onset = std::max(0.0f, flux - m_onsetMean);
     m_lastOnset = onset;
     m_envelope[m_envWrite] = onset;
-    // Phase is located mostly from low-frequency onsets: the beat is felt in the kick/bass,
-    // and broadband hats on the off-beat would otherwise pull the grid half a beat out.
-    m_lowEnvelope[m_envWrite] = std::max(0.0f, fluxLow - m_lowMean) + 0.15f * onset;
     m_envWrite = (m_envWrite + 1) % kEnvelopeSize;
     ++m_hopCount;
 
@@ -116,12 +150,11 @@ void BeatTracker::ProcessHop() {
     m_state.barPhase = (static_cast<float>((m_barBeat - downbeat + 4) & 3) + m_phase) / 4.0f;
 }
 
-float BeatTracker::EnvelopeAt(float ticksAgo, const float* envelope) const {
-    if (!envelope) envelope = m_envelope;
+float BeatTracker::EnvelopeAt(float ticksAgo) const {
     if (ticksAgo < 0.0f) ticksAgo = 0.0f;
     const int i0 = static_cast<int>(ticksAgo);
     const float f = ticksAgo - i0;
-    auto at = [&](int ago) { return envelope[((m_envWrite - 1 - ago) % kEnvelopeSize + kEnvelopeSize) % kEnvelopeSize]; };
+    auto at = [&](int ago) { return m_envelope[((m_envWrite - 1 - ago) % kEnvelopeSize + kEnvelopeSize) % kEnvelopeSize]; };
     return at(i0) * (1.0f - f) + at(i0 + 1) * f;
 }
 
@@ -171,33 +204,58 @@ void BeatTracker::EstimateTempo() {
         const float denom = a - 2.0f * b + c;
         if (denom < 0.0f) period += 0.5f * (a - c) / denom;
     }
-    m_rawConfidence = std::clamp(ac[best] / ac[0] * 1.6f, 0.0f, 1.0f);
-    if (m_rawConfidence < 0.08f) return;   // too aperiodic to trust
+    const float periodicity = std::max(0.0f, ac[best] / ac[0]);
+    m_state.periodicity = periodicity;
+    if (periodicity < 0.05f) { m_rawConfidence = 0.0f; return; }   // too aperiodic to trust
 
-    // Tempo hysteresis: small drifts are followed smoothly; jumps need repeated agreement.
+    // Tempo hysteresis: small drifts are followed smoothly. A different tempo must win for
+    // ~1.5 s *and* clearly outscore the current one (real music briefly favours 4/3, 3/2...).
+    const int currentLag = static_cast<int>(std::lround(m_period));
+    const float currentScore = (currentLag >= lagMin && currentLag <= lagMax) ? score[currentLag] : 0.0f;
     if (m_period <= 0.0f) {
         m_period = period;
     } else if (std::fabs(period / m_period - 1.0f) < 0.05f) {
         m_period += 0.25f * (period - m_period);
         m_candidateVotes = 0;
-    } else {
+    } else if (score[best] > (m_state.confidence > 0.5f ? 1.3f : 1.1f) * currentScore) {
+        // (A confidently locked tempo needs a much clearer winner before it moves.)
         if (m_candidateVotes > 0 && std::fabs(period / m_candidatePeriod - 1.0f) < 0.05f) ++m_candidateVotes;
         else { m_candidatePeriod = period; m_candidateVotes = 1; }
-        if (m_candidateVotes >= 3) {   // ~0.75 s of consistent evidence
+        if (m_candidateVotes >= 6) {
             m_period = m_candidatePeriod;
             m_candidateVotes = 0;
         }
+    } else {
+        m_candidateVotes = 0;   // the current tempo is still competitive: keep it
     }
 
     // Phase: which offset (ticks since the last beat) lines up best with recent onsets?
-    float bestOffset = 0.0f, bestScore = -1.0f;
+    float bestOffset = 0.0f, bestScore = -1.0f, scoreSum = 0.0f;
+    int offsets = 0;
     for (float offset = 0.0f; offset < m_period; offset += 0.5f) {
         float s = 0.0f, w = 1.0f;
-        for (int k = 0; k < kCombBeats; ++k, w *= 0.85f) s += w * EnvelopeAt(offset + k * m_period, m_lowEnvelope);
+        for (int k = 0; k < kCombBeats; ++k, w *= 0.85f) s += w * EnvelopeAt(offset + k * m_period);
+        scoreSum += s;
+        ++offsets;
         if (s > bestScore) { bestScore = s; bestOffset = offset; }
     }
-    const float measured = Wrap01(bestOffset / m_period);
+    // Comb contrast (diagnostic): how much the best beat position stands out from the others.
+    const float meanScore = scoreSum / std::max(offsets, 1);
+    m_state.contrast = meanScore > 1e-9f ? bestScore / meanScore - 1.0f : 0.0f;
+
+    // An onset only shows up in the envelope a little after it happened (it has to get well
+    // inside the analysis window), so beats are really kLatencyTicks further back than they look.
+    // Measured on real recordings with tools/analysis: uncorrected, grids ran 30-40 ms late.
+    const float measured = Wrap01((bestOffset + kLatencyTicks) / m_period);
     const float error = WrapHalf(measured - m_phase);
+
+    // Confidence from phase consistency: with a real beat, each new measurement agrees with
+    // where the oscillator already is; without one (rubato piano, ambient) the "best" beat
+    // position wanders randomly and the average error tends towards 0.25 of a beat.
+    m_phaseErrorAvg += (std::fabs(error) - m_phaseErrorAvg) * 0.1f;   // ~2.5 s
+    m_state.phaseError = m_phaseErrorAvg;
+    m_rawConfidence = std::clamp((kPhaseErrorBad - m_phaseErrorAvg) / (kPhaseErrorBad - kPhaseErrorGood), 0.0f, 1.0f) *
+                      std::clamp(periodicity / kPeriodicityFloor, 0.0f, 1.0f);
     m_phase += 0.35f * error;   // pull the oscillator towards the measured phase
     if (m_phase < 0.0f) m_phase += 1.0f;
     if (m_phase >= 1.0f) { m_phase -= 1.0f; ++m_state.beatIndex; m_barBeat = (m_barBeat + 1) & 3; }

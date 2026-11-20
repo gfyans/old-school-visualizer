@@ -5,6 +5,9 @@ Ideas for where this could go, roughly in order of impact. ✅ = done.
 ## 1. Smarter listening
 - ✅ **Tempo and beat-grid tracking.** Lock to the song's BPM and *predict* beats, so motion lands exactly on them (including moves across 4/8 bars).
 - ✅ **Song structure.** Detect build-ups and drops: tighten and accelerate during a build, explode into a new look on the drop.
+- ✅ **Real-music tuning.** Recorder and replay tools; tracker, confidence and structure calibrated on six real songs.
+- **Harder rhythms.** Beat placement on thrash metal and syncopated techno (occasional quarter-beat slips), e.g. a
+  look-ahead dynamic-programming phase stage. Lock faster after a beatless intro.
 - **Mood and key.** Minor/slow songs pull towards calm, cool palettes; energetic tracks go warm and fast. Chord changes shift hue.
 - **Instrument separation.** Real-time source separation (kick, snare, vocals, synths) so each can drive its own visual element.
 - ✅ **Now playing.** Read title and album art from Windows media controls; take the palette from the album art; show the title at song start.

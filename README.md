@@ -54,13 +54,26 @@ Press `D` until the device your music plays on is selected.
 
 ## Listening: beat grid and structure
 
-* **Tempo and phase.** A 100 Hz onset envelope (log spectral flux) is autocorrelated over 5 s to find the beat period.
-  A comb filter over the bass onsets then finds where the beats fall, and a phase-locked oscillator predicts them.
-  In tests, predicted beats land within 14–21 ms of the real kicks at 120–140 BPM; very fast tempos like 174 BPM DnB
-  lock at half-time (87). `F1` shows BPM and confidence; the lower beat lamp flashes on the predicted beat.
+* **Tempo and phase.** A 100 Hz onset envelope (spectral flux pooled over 40 log-spaced bands, like a mel onset
+  strength) is autocorrelated over 5 s to find the beat period. A comb filter finds where the beats fall, and a
+  phase-locked oscillator predicts them, compensating for the ~20 ms it takes to detect an onset.
+  Synthetic tests: predicted beats land within 6–19 ms of the kicks at 120–140 BPM; 174 BPM DnB locks at half-time (87).
+* **Confidence** comes from phase consistency (a real beat keeps agreeing with itself), scaled down when there are no
+  drums. Visuals only follow the grid above ~0.4. `F1` shows BPM and confidence; the lower beat lamp flashes on the
+  predicted beat.
+* **Drums present** (`percussive`): drum hits make many frequency bands jump at once, while tonal notes light up a few.
 * **Build-ups:** the high band rising steadily over several seconds, especially with the bass cut.
 * **Drops:** the bass returning after at least 1.5 s away, or a big level jump after a build. These are measured
-  in raw dB before auto-gain, so they don't depend on volume.
+  in raw dB before auto-gain, so they don't depend on volume. Build-ups and drops are only judged after a 4 s warm-up
+  and when drums were present in the last 15 s, so fade-ins and piano crescendos don't count.
+
+### Tuned on real music
+
+The analyzer was checked against real recordings (thrash, boom-bap, techno, electronic, electro/dubstep and solo piano)
+with the tools in [`tools/analysis`](tools/analysis/README.md). They replay a recording through the real analyzer and
+score it against an offline reference beat tracker. Tempo matched the reference within 0.5 BPM on every song with a beat.
+Beat placement is excellent on steady grooves (F ≈ 0.9 on hip-hop and electronic) and weaker on thrash metal and
+syncopated techno, where confidence stays honestly low so visuals don't lock onto a shaky grid.
 
 ## Performance
 
@@ -94,6 +107,8 @@ The exe statically links the C runtime and embeds all shaders. Its only dependen
 (Direct3D 11, Direct2D, DirectWrite, WASAPI), and it needs a DirectX 11 GPU (anything since ~2010).
 
 Dev tools:
+* `build\Release\vis_record.exe` records what's playing, one WAV per song (git-ignored), and `vis_replay.exe` plus
+  `tools\analysis\analyze.py` score the analyzer on those recordings. See [tools/analysis](tools/analysis/README.md).
 * `build\Release\capture_probe.exe [seconds]` prints what the loopback capture receives.
 * `VISUALIZER_GPU_BUDGET_MS=0.1` (environment variable) forces adaptive resolution to kick in.
 * `tools\make_icon.ps1` regenerates `res\app.ico`.

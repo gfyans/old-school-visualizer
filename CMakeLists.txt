@@ -95,6 +95,19 @@ target_compile_definitions(analyzer_test PRIVATE ${COMMON_DEFS})
 target_compile_options(analyzer_test PRIVATE ${COMMON_OPTS})
 target_link_options(analyzer_test PRIVATE ${COMMON_LINK})
 
+# Dev tools for tuning on real music (see tools/analysis/README.md)
+add_executable(vis_record tools/recorder/recorder.cpp src/audio/AudioCapture.cpp
+    src/media/NowPlaying.cpp src/platform/Settings.cpp)
+target_include_directories(vis_record PRIVATE src)
+target_link_libraries(vis_record PRIVATE audio_analysis ole32 shell32 windowsapp)
+target_compile_definitions(vis_record PRIVATE ${COMMON_DEFS})
+target_compile_options(vis_record PRIVATE ${COMMON_OPTS})
+
+add_executable(vis_replay tools/replay/replay.cpp)
+target_link_libraries(vis_replay PRIVATE audio_analysis)
+target_compile_definitions(vis_replay PRIVATE ${COMMON_DEFS})
+target_compile_options(vis_replay PRIVATE ${COMMON_OPTS})
+
 add_executable(capture_probe tests/capture_probe.cpp src/audio/AudioCapture.cpp)
 target_include_directories(capture_probe PRIVATE src)
 target_link_libraries(capture_probe PRIVATE ole32)

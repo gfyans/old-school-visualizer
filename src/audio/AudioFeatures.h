@@ -26,6 +26,7 @@ struct AudioFeatures {
     float barPhase = 0;         // 0..1 through the current 4-beat bar
     uint32_t gridBeat = 0;      // increments on every predicted beat
     float tempoConfidence = 0;  // 0..1: use the grid when this is high (> ~0.4)
+    float percussive = 0;       // 0..1: drums present above ~0.36; solo piano / pads below ~0.3
 
     // --- Song structure ---
     float buildUp = 0;          // 0..1: rising tension (risers, rolls, bass pulled out)

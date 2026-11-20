@@ -20,6 +20,7 @@ public:
     void Update(const float* samples, float sampleRate, bool newData, float dt);
 
     const AudioFeatures& Features() const { return m_features; }
+    const BeatTracker::State& TrackerState() const { return m_beats.GetState(); }   // diagnostics
 
 private:
     static constexpr int kBins = kFftSize / 2;
@@ -59,6 +60,8 @@ private:
     float m_bassAbsentTime = 0;
     float m_lastBassAbsent = 0;     // previous frame's m_bassAbsentTime
     float m_dropCooldown = 0;
+    float m_activeTime = 0;         // seconds of continuous (non-silent) audio
+    float m_rhythmHold = 0;         // > 0 while a confident beat was seen recently
 
     BeatTracker m_beats;
     AudioFeatures m_features;

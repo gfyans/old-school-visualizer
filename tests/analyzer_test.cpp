@@ -233,6 +233,56 @@ int main() {
         Check(!dropTimes.empty() && dropTimes[0] >= 20.0f && dropTimes[0] < 20.7f, "drop detected within 0.7 s");
     }
 
+    std::printf("Song starting from silence with a fade-in\n");
+    {
+        // 2 s silence, 3 s fade-in, then a steady groove: none of this is a drop or a build-up.
+        Signal groove = Kicks(124.0f, 0.5f);
+        float maxBuild = 0.0f;
+        Result r = Run(14.0f, [&](float t) {
+            if (t < 2.0f) return 0.0f;
+            const float fade = std::fmin(1.0f, (t - 2.0f) / 3.0f);
+            return groove(t) * fade * fade;
+        }, [&](float, const AudioFeatures& f) { maxBuild = std::fmax(maxBuild, f.buildUp); });
+        std::printf("    drops %u, max build-up %.2f\n", r.last.dropCount, maxBuild);
+        Check(r.last.dropCount == 0, "no drop at song start");
+        Check(maxBuild < 0.25f, "no build-up from a fade-in");
+    }
+
+    std::printf("Drumless piano: crescendo, left hand coming and going\n");
+    {
+        // Soft-attack piano-like notes at irregular (rubato) times; a crescendo over 12-20 s;
+        // low left-hand notes absent 8-14 s then back. Real-music tuning found these read as
+        // build-ups and drops (Debussy). None of it should.
+        std::mt19937 rng(5);
+        struct Note { float start, freq, amp; };
+        std::vector<Note> notes;
+        for (float t = 0.2f; t < 26.0f; t += std::uniform_real_distribution<float>(0.18f, 0.55f)(rng)) {
+            const float crescendo = 0.25f + 0.75f * std::clamp((t - 12.0f) / 8.0f, 0.0f, 1.0f);
+            notes.push_back({ t, 440.0f * std::pow(2.0f, std::uniform_int_distribution<int>(-5, 14)(rng) / 12.0f), 0.18f * crescendo });
+            if (t < 8.0f || t > 14.0f) notes.push_back({ t, 55.0f * std::pow(2.0f, std::uniform_int_distribution<int>(0, 7)(rng) / 12.0f), 0.25f });
+        }
+        auto piano = [&](float t) {
+            float s = 0.0f;
+            for (const Note& n : notes) {
+                const float a = t - n.start;
+                if (a < 0.0f || a > 3.0f) continue;
+                const float env = std::fmin(1.0f, a / 0.03f) * std::exp(-a * 1.8f);   // soft hammer attack
+                s += n.amp * env * (std::sin(2 * kPi * n.freq * a) + 0.4f * std::sin(4 * kPi * n.freq * a));
+            }
+            return s * 0.5f;
+        };
+        float maxBuild = 0.0f, maxConf = 0.0f;
+        Result r = Run(26.0f, piano, [&](float t, const AudioFeatures& f) {
+            maxBuild = std::fmax(maxBuild, f.buildUp);
+            if (t > 8.0f) maxConf = std::fmax(maxConf, f.tempoConfidence);
+        });
+        std::printf("    drops %u, max build-up %.2f, max tempo confidence %.2f, percussive %.2f\n",
+            r.last.dropCount, maxBuild, maxConf, r.last.percussive);
+        Check(r.last.dropCount == 0, "no drops without drums");
+        Check(maxBuild < 0.25f, "no build-up from a crescendo");
+        Check(maxConf < 0.4f, "beat grid not trusted without drums");
+    }
+
     std::printf("Waveform\n");
     {
         Result r = Run(1.0f, [](float t) { return 0.3f * std::sin(2.0f * kPi * 200.0f * t); });

@@ -8,6 +8,9 @@ namespace {
 constexpr float kMinFreq = 30.0f, kMaxFreq = 16000.0f;
 constexpr float kRangeDb = 45.0f;      // dynamic range shown below the auto-gain reference
 constexpr float kFloorDb = -50.0f;     // auto-gain never boosts beyond this (keeps silence dark)
+constexpr float kStructureWarmUp = 4.0f;   // seconds of audio before build-ups/drops are judged
+constexpr float kRhythmMemory = 15.0f;     // how long drums keep structure detection on
+constexpr float kDrumsPresent = 0.36f;     // percussiveness above this = drums are playing
 
 // Exponential approach with separate rise/fall time constants (seconds); frame-rate independent.
 float Smooth(float current, float target, float dt, float attack, float release) {
@@ -138,7 +141,10 @@ void AudioAnalyzer::Update(const float* samples, float sampleRate, bool newData,
     f.beatPhase = grid.beatPhase;
     f.barPhase = grid.barPhase;
     f.gridBeat = grid.beatIndex;
-    f.tempoConfidence = f.silent ? 0.0f : grid.confidence;
+    f.percussive = grid.percussive;
+    // Without drums a "beat" is at best a soft pulse: don't let visuals lock onto it hard.
+    const float drumFactor = std::clamp((grid.percussive - 0.22f) / 0.14f, 0.0f, 1.0f);
+    f.tempoConfidence = f.silent ? 0.0f : grid.confidence * drumFactor;
 
     // --- Structure & waveform ---
     double bassP = 0, highP = 0, totalP = 0;
@@ -184,8 +190,20 @@ void AudioAnalyzer::UpdateStructure(float bassPower, float highPower, float tota
 
     if (f.silent) {   // nothing to analyse; don't let silence look like "bass removed"
         m_bassAbsentTime = 0.0f;
+        m_lastBassAbsent = 0.0f;
+        m_activeTime = 0.0f;
+        m_structureInit = false;   // the next song starts with fresh baselines
+        m_highCount = 0;
         f.buildUp = Smooth(f.buildUp, 0.0f, dt, 1.0f, 0.5f);
         return;
+    }
+    const bool warmUpEnds = m_activeTime <= kStructureWarmUp && m_activeTime + dt > kStructureWarmUp;
+    m_activeTime += dt;
+    if (warmUpEnds) {
+        // Start judging from fresh baselines: forget the intro / fade-in entirely.
+        m_structureInit = false;
+        m_highCount = 0;
+        m_bassAbsentTime = m_lastBassAbsent = 0.0f;
     }
 
     m_bassShort = Smooth(m_bassShort, bassDb, dt, 0.08f, 0.15f);
@@ -217,14 +235,24 @@ void AudioAnalyzer::UpdateStructure(float bassPower, float highPower, float tota
     const bool bassAbsent = m_bassShort < m_bassRef - 9.0f;
     m_bassAbsentTime = bassAbsent ? m_bassAbsentTime + dt : 0.0f;
 
+    // Build-ups and drops only exist in music with drums. Remember drums for 15 s, which
+    // comfortably covers a beatless breakdown before a drop, but keeps piano crescendos and
+    // ambient swells from reading as builds and drops. (Calibrated with tools/analysis:
+    // drum-driven songs sit at 0.38-0.60, solo piano at <= 0.28.)
+    m_rhythmHold = f.percussive > kDrumsPresent ? kRhythmMemory : std::max(0.0f, m_rhythmHold - dt);
+
+    // Warm-up: the first seconds of a song (often a fade-in) would otherwise read as a
+    // rising build followed by a jump. Let the baselines settle before judging structure.
+    const bool warmedUp = m_activeTime > kStructureWarmUp && m_rhythmHold > 0.0f;
+
     // Build-up: the highs are steadily rising (risers, snare rolls), more so with the bass cut.
-    float build = std::clamp((slope - 0.5f) / 3.0f, 0.0f, 1.0f) * (bassAbsent ? 1.0f : 0.5f);
+    float build = warmedUp ? std::clamp((slope - 0.5f) / 3.0f, 0.0f, 1.0f) * (bassAbsent ? 1.0f : 0.5f) : 0.0f;
     f.buildUp = Smooth(f.buildUp, build, dt, 1.0f, 0.6f);
 
     // Drop: the bass slams back in after being away, or a big jump in level after a build.
     const bool bassReturn = !bassAbsent && m_lastBassAbsent >= 1.5f;
     const bool levelJump = f.buildUp > 0.3f && !bassAbsent && m_levelFast > m_levelSlow + 6.0f;
-    if ((bassReturn || levelJump) && m_dropCooldown <= 0.0f) {
+    if (warmedUp && (bassReturn || levelJump) && m_dropCooldown <= 0.0f) {
         f.drop = 1.0f;
         ++f.dropCount;
         f.buildUp = 0.0f;
