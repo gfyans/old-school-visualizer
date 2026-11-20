@@ -20,7 +20,7 @@ public:
     const wchar_t* Name() const override { return L"Nebula"; }
     bool CreateResources(ID3D11Device* device) override;
     void ReleaseResources() override;
-    float RenderScale() const override { return 0.5f; }   // soft gas: half resolution looks identical
+    float RenderScale() const override { return 0.6f; }   // soft gas tolerates upscaling well
     void Activate() override;
     void Update(const AudioFeatures& audio, float dt) override;
     void Render(Renderer& renderer, float time, float dt) override;
@@ -64,6 +64,7 @@ private:
     // Audio-driven, smoothed
     uint32_t m_lastBeatCount = 0;
     float m_beatPulse = 0.0f;
+    float m_zoom = 0.0f;   // smoothed beat pulse driving the field of view
     float m_shellAge = 10.0f;
     float m_shellPower = 0.0f;
     float m_exposure = 0.6f;

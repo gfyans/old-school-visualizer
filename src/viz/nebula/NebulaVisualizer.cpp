@@ -35,7 +35,7 @@ struct Palette {
 };
 const Palette kPalettes[] = {
     { L"Orion",       { 0.05f, 0.03f, 0.12f }, { 0.60f, 0.18f, 0.55f }, { 1.00f, 0.60f, 0.45f } },
-    { L"Teal Drift",  { 0.01f, 0.05f, 0.10f }, { 0.04f, 0.50f, 0.62f }, { 0.55f, 1.00f, 0.80f } },
+    { L"Teal Drift",  { 0.01f, 0.05f, 0.10f }, { 0.04f, 0.50f, 0.62f }, { 0.60f, 0.95f, 1.00f } },
     { L"Ember",       { 0.08f, 0.02f, 0.02f }, { 0.85f, 0.28f, 0.08f }, { 1.00f, 0.85f, 0.50f } },
     { L"Ice & Gold",  { 0.02f, 0.04f, 0.12f }, { 0.20f, 0.40f, 0.95f }, { 1.00f, 0.78f, 0.35f } },
     { L"Emerald",     { 0.00f, 0.05f, 0.05f }, { 0.06f, 0.58f, 0.38f }, { 0.70f, 1.00f, 0.40f } },
@@ -209,8 +209,11 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_treble = Smooth(m_treble, audio.treble, dt, 0.02f, 0.2f);
 
     const float targetSpeed = audio.silent ? 0.25f
-        : 0.35f + 1.1f * audio.intensity + 0.5f * audio.bass + 0.7f * m_beatPulse;
+        : 0.35f + 1.1f * audio.intensity + 0.5f * audio.bass + 0.25f * m_beatPulse;
     m_speed = Smooth(m_speed, targetSpeed, dt, 0.5f, 2.0f);
+
+    // Beat zoom: small and eased in (never a one-frame jump), which is what avoids motion sickness.
+    m_zoom = Smooth(m_zoom, m_beatPulse, dt, 0.15f, 0.6f);
 
     const float targetExposure = audio.silent ? 0.8f : 0.7f + 0.3f * audio.level + 0.3f * m_beatPulse;
     m_exposure = Smooth(m_exposure, targetExposure, dt, 0.08f, 0.8f);
@@ -265,7 +268,7 @@ void NebulaVisualizer::Render(Renderer& renderer, float, float) {
                       + up[i] * 1.5f * std::sin(m_time * 0.17f + 1.0f);
         c.lightColor[i] = 0.6f * look.hot[i] + 0.4f * look.mid[i];
     }
-    c.tanHalfFov = std::tan((38.0f - 3.0f * m_beatPulse) * kPi / 180.0f);   // beat: slight zoom punch
+    c.tanHalfFov = std::tan((38.0f - 0.8f * m_zoom) * kPi / 180.0f);   // beat: gentle zoom swell
     c.exposure = m_exposure * 2.4f;
     c.starBoost = (m_silent ? 0.9f : 0.9f + 1.6f * m_treble);
     c.sparkle = m_treble * 1.5f;
@@ -278,7 +281,7 @@ void NebulaVisualizer::Render(Renderer& renderer, float, float) {
     c.absorb = look.absorb;
     c.ambient = 0.3f;
     c.threshold = look.threshold - 0.035f * m_bass;
-    c.gain = look.gain * (1.0f + 0.25f * m_bass);
+    c.gain = look.gain * 1.15f * (1.0f + 0.25f * m_bass);
     c.warp = look.warp * (1.0f + 0.7f * m_mids);
     c.filament = look.filament;
     c.warpOffset[0] = m_swirl;

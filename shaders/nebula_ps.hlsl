@@ -43,8 +43,9 @@ void Gas(float3 p, out float density, out float dust, out float shade, out float
     float4 a = Noise.SampleLevel(Wrap, q / 32.0, 0);
     float4 b = Noise.SampleLevel(Wrap, q / 8.0, 0);
     float base = lerp(a.x, a.y, filament);
-    // Detail octave plus fine cellular erosion gives billowy, sharper edges.
-    float d = base + (b.x - 0.5) * detail - (1.0 - b.w) * 0.09;
+    // Detail octaves plus fine cellular erosion give billowy, crisp edges.
+    float fine = Noise.SampleLevel(Wrap, q / 4.0, 0).x;
+    float d = base + (b.x - 0.5) * detail + (fine - 0.5) * detail * 0.5 - (1.0 - b.w) * 0.09;
     density = saturate((d - threshold) * gain);
     // Dark dust lanes: absorb light but don't glow.
     dust = saturate((w.y - 0.58) * 6.0) * saturate((b.y - 0.35) * 2.0);
@@ -96,7 +97,8 @@ float4 main(VSOut i) : SV_Target {
 
         float density, dust, shade, glint;
         Gas(p, density, dust, shade, glint);
-        float fade = smoothstep(0.0, 2.5, t) * smoothstep(kMaxDist, kMaxDist * 0.5, t);
+        // Fade gas very close to the lens: up close the noise is magnified into big soft blobs.
+        float fade = smoothstep(1.0, 5.5, t) * smoothstep(kMaxDist, kMaxDist * 0.5, t);
         density *= fade;
         dust *= fade;
 
@@ -126,8 +128,10 @@ float4 main(VSOut i) : SV_Target {
     float peak = max(col.r, max(col.g, col.b));
     float mapped = 1.0 - exp(-peak * exposure);
     col *= mapped / max(peak, 1e-4);
-    col = lerp(col, mapped.xxx, smoothstep(0.75, 1.0, mapped) * 0.5);
+    col = lerp(col, mapped.xxx, smoothstep(0.8, 1.0, mapped) * 0.2);
     col = pow(saturate(col), 1.0 / 2.2);        // linear -> display
+    float luma = dot(col, float3(0.2126, 0.7152, 0.0722));
+    col = saturate(lerp(luma.xxx, col, 1.35));  // vibrance: push colours away from grey
     float2 v = i.uv - 0.5;
     col *= 1.0 - dot(v, v) * 0.7;               // vignette
     return float4(col, 1);
