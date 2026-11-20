@@ -1,4 +1,4 @@
-﻿# Roadmap
+# Roadmap
 
 Ideas for where this could go, roughly in order of impact. ✅ = done.
 
@@ -18,19 +18,19 @@ Ideas for where this could go, roughly in order of impact. ✅ = done.
 - **Particle galaxy.** About a million GPU particles around a black hole; bass drives gravity, beats fling out spiral arms.
 - **Oscilloscope / vector display.** Phosphor-green waveform on a CRT, with scanlines and bloom.
 - **Fractal flights.** Raymarched Mandelbulbs / kaleidoscopic fractals that breathe with the music.
-- **Synthwave terrain.** Neon grid landscape whose mountains are the scrolling spectrum history.
+- ✅ **Synthwave terrain** ("Neon Grid"). Neon grid landscape whose mountains are the scrolling spectrum history.
 - **Aurora.** Curtains of light rippling to the mids over a silhouetted landscape.
 
 ## 3. Nebula upgrades
-- **Temporal accumulation (TAA-style).** Reproject and blend previous frames to remove grain: sharper *and* cheaper.
+- ✅ **Temporal accumulation (TAA-style).** Reproject and blend previous frames to remove grain: sharper *and* cheaper.
 - **Real light scattering.** Light marching through the gas for bright rims and dark undersides.
 - **Bloom** on the core and stars; subtle lens effects.
 - **Events.** Comets, a pulsar sweeping on the beat, a supernova on a huge drop.
 - **Directed flight paths.** Steer towards interesting dense regions instead of wandering.
 
 ## 4. Feel and interaction
-- **Auto-cycle mode.** Switch visualisers on song change or every N minutes.
-- **Transitions with character.** Dissolves, zoom-throughs and warps instead of crossfades.
+- ✅ **Auto-cycle mode.** Switch visualisers on song change or every N minutes.
+- ✅ **Transitions with character.** Dissolves, zoom-throughs and warps instead of crossfades.
 - **Mouse / gamepad control.** Steer the camera; a "chill ↔ intense" reactivity slider.
 - **Presets and favourites.** Save looks you love.
 - **Screensaver build.** The same exe as a `.scr`.

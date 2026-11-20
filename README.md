@@ -4,6 +4,8 @@ A modern take on the Winamp-era music visualiser. A single small `.exe` with no 
 It listens to whatever your PC is playing (Spotify, a browser, games…) and renders it on the GPU.
 
 * **Nebula**: fly through a glowing volumetric gas cloud that reacts to the music.
+* **Neon Grid**: a cyberpunk flight down a neon road under a striped sun. The mountains are built from the music:
+  each row of terrain is one moment's spectrum, entering at the horizon.
 * **Liquid**: Milkdrop-style feedback. Waveform ink is warped, faded and hue-shifted every frame into
   tunnels, vortices, ripples and kaleidoscopes.
 * **Spectrum**: classic bar spectrum.
@@ -18,11 +20,12 @@ It also understands the music beyond loudness:
 
 | Key | Action |
 |---|---|
-| `←` `→` | Previous / next visualiser (crossfades) |
+| `←` `→` | Previous / next visualiser (with a random transition: crossfade, glitch cut, zoom-through, iris or pixel dissolve) |
+| `C` | Auto-cycle: a new visualiser with each song (or every 4 minutes without track info) |
 | `F`, `Alt+Enter`, double-click | Toggle fullscreen |
-| `N` | Next look (Nebula: palette + gas shape; Liquid: preset) |
+| `N` | Next look (Nebula: palette + gas shape; Neon Grid: colour scheme; Liquid: preset) |
 | `Space` | Lock / unlock the current look |
-| `B` | Equaliser bars along the bottom (glass bars with falling peak caps, tinted to the current look) |
+| `B` | Cyberpunk equaliser bars along the bottom (neon LED segments, glitch tears on hard hits) |
 | `A` | Album-art colours on / off |
 | `T` | Track titles on / off |
 | `D` | Cycle audio device: system default → each output → … |
@@ -30,7 +33,7 @@ It also understands the music beyond loudness:
 | `H` | Help |
 | `Esc` | Leave fullscreen, or quit |
 
-Window position, fullscreen, the last visualiser, the audio device and the B/A/T toggles are remembered in
+Window position, fullscreen, the last visualiser, the audio device and the B/A/T/C toggles are remembered in
 `%APPDATA%\Visualizer\settings.ini` (delete it to reset).
 
 **No visuals reacting?** Press `F1`. If it says *(silent)* while music plays, your player is outputting to a
@@ -79,7 +82,10 @@ syncopated techno, where confidence stays honestly low so visuals don't lock ont
 
 Measured on an RTX 3080 at 2560×1440 fullscreen:
 
-* Nebula: about 1.1–1.8 ms GPU per frame, rendered at 60% resolution and upscaled.
+* Nebula: about 1.2 ms GPU per frame. It renders at 50% resolution with temporal accumulation (TAA): each frame is
+  jittered and blended with the reprojected previous result, which removes raymarch grain and recovers sub-pixel
+  detail, so it looks the same as 60% did at about 30% less cost.
+* Neon Grid: about 0.35 ms GPU per frame (75% resolution, for crisp lines).
 * Liquid: about 0.06 ms GPU per frame.
 * Spectrum: 0.01 ms GPU per frame.
 * CPU: under 1% of one core in a window, about 3.5% fullscreen with the stats overlay.
@@ -111,6 +117,8 @@ Dev tools:
   `tools\analysis\analyze.py` score the analyzer on those recordings. See [tools/analysis](tools/analysis/README.md).
 * `build\Release\capture_probe.exe [seconds]` prints what the loopback capture receives.
 * `VISUALIZER_GPU_BUDGET_MS=0.1` (environment variable) forces adaptive resolution to kick in.
+* `VISUALIZER_TAA=0` turns off the Nebula's temporal accumulation, and `VISUALIZER_SEED=<n>` makes its look and
+  flight path repeatable. Together they allow before/after comparisons.
 * `tools\make_icon.ps1` regenerates `res\app.ico`.
 
 ## Architecture
@@ -128,7 +136,7 @@ src/
   render/GpuTimer           non-blocking GPU timestamp queries
   viz/Visualizer.h          the plug-in interface (IVisualizer)
   viz/VisualizerHost        offscreen targets, crossfades, adaptive resolution
-  viz/nebula/, viz/feedback/, viz/spectrum/
+  viz/nebula/, viz/neongrid/, viz/feedback/, viz/spectrum/
   ui/Overlay                messages, now-playing caption, F1 stats, H help (DirectWrite)
   ui/EqBars                 optional equaliser bars drawn over any visualiser
 shaders/                    HLSL, compiled at build time into headers
