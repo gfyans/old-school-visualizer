@@ -14,6 +14,7 @@ struct Settings {
     bool showBars = false;      // equaliser bars along the bottom
     bool albumColours = true;   // take palettes from the playing track's album art
     bool trackTitles = true;    // show title/artist when a song starts
+    bool autoCycle = false;     // new visualiser with each song
 
     void Load();
     void Save() const;

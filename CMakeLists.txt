@@ -40,10 +40,12 @@ compile_shader(fullscreen_vs.hlsl vs_5_0 g_fullscreen_vs)
 compile_shader(composite_ps.hlsl  ps_5_0 g_composite_ps)
 compile_shader(spectrum_ps.hlsl   ps_5_0 g_spectrum_ps)
 compile_shader(nebula_ps.hlsl     ps_5_0 g_nebula_ps)
+compile_shader(nebula_taa_ps.hlsl ps_5_0 g_nebula_taa_ps)
 compile_shader(noise3d_cs.hlsl    cs_5_0 g_noise3d_cs)
 compile_shader(eqbars_ps.hlsl     ps_5_0 g_eqbars_ps)
 compile_shader(feedback_warp_ps.hlsl ps_5_0 g_feedback_warp_ps)
 compile_shader(feedback_out_ps.hlsl  ps_5_0 g_feedback_out_ps)
+compile_shader(neongrid_ps.hlsl      ps_5_0 g_neongrid_ps)
 
 # ---------------------------------------------------------------------------
 # Audio analysis (pure C++, shared with tests)
@@ -70,6 +72,7 @@ add_executable(Visualizer WIN32
     src/viz/spectrum/SpectrumVisualizer.cpp
     src/viz/nebula/NebulaVisualizer.cpp
     src/viz/feedback/FeedbackVisualizer.cpp
+    src/viz/neongrid/NeonGridVisualizer.cpp
     src/media/NowPlaying.cpp
     res/app.rc
     ${SHADER_HEADERS})

@@ -10,6 +10,7 @@
 #include "viz/VisualizerHost.h"
 #include "viz/feedback/FeedbackVisualizer.h"
 #include "viz/nebula/NebulaVisualizer.h"
+#include "viz/neongrid/NeonGridVisualizer.h"
 #include "viz/spectrum/SpectrumVisualizer.h"
 
 #include <algorithm>
@@ -20,10 +21,12 @@ namespace {
 constexpr wchar_t kAppName[] = L"Visualizer";
 constexpr float kIdleAfterSilence = 5.0f;   // seconds of silence before dropping to low-power frame rate
 constexpr double kIdleFps = 30.0;
+constexpr float kAutoCycleSeconds = 240.0f;   // auto-cycle fallback when no song changes are reported
 
 // To add a visualiser: implement IVisualizer and add it here. Order = ←/→ order.
 void RegisterVisualizers(VisualizerHost& host) {
     host.Add(std::make_unique<NebulaVisualizer>());
+    host.Add(std::make_unique<NeonGridVisualizer>());
     host.Add(std::make_unique<FeedbackVisualizer>());
     host.Add(std::make_unique<SpectrumVisualizer>());
 }
@@ -111,7 +114,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     };
 
     bool showStats = false, showHelp = false;
-    auto announce = [&] { overlay.ShowMessage(host.Active().Name()); };
+    bool autoCycle = settings.autoCycle;
+    float sinceSwitch = 0.0f;
+    auto announce = [&] { overlay.ShowMessage(host.Active().Name()); sinceSwitch = 0.0f; };
 
     // D: cycle System default -> each active output device -> back to default.
     auto cycleAudioDevice = [&] {
@@ -139,6 +144,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         settings.showBars = eqBars.Visible();
         settings.albumColours = albumColours;
         settings.trackTitles = trackTitles;
+        settings.autoCycle = autoCycle;
         settings.Save();
     };
     window.onClose = saveSettings;   // while the window still exists
@@ -165,6 +171,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             applyPalette(false);
             overlay.ShowMessage(albumColours ? (track.hasPalette ? L"Album colours on" : L"Album colours on (none for this track)")
                                              : L"Album colours off", 2.0f);
+            break;
+        case 'C':
+            autoCycle = !autoCycle;
+            sinceSwitch = 0.0f;
+            overlay.ShowMessage(autoCycle ? L"Auto-cycle on: a new visualiser with each song" : L"Auto-cycle off", 2.5f);
             break;
         case 'T':
             trackTitles = !trackTitles;
@@ -249,6 +260,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             seenPalette = track.paletteSerial;
             if (newTrack && trackTitles) overlay.ShowTrack(track.title, track.artist);
             if (newTrack || newPalette) applyPalette(newTrack);
+            // Auto-cycle: a new visualiser with each new song (not for the song already
+            // playing when the app starts).
+            if (newTrack && autoCycle && track.trackSerial > 1) {
+                host.SelectRandom();
+                sinceSwitch = 0.0f;
+            }
+        }
+        sinceSwitch += dt;
+        if (autoCycle && sinceSwitch > kAutoCycleSeconds && !audio.silent) {
+            host.SelectRandom();
+            announce();
         }
 
         // --- Visuals ---

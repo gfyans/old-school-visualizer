@@ -10,6 +10,7 @@ constexpr float kDesignHeight = 1080.0f;
 
 const wchar_t* const kHelpLines[][2] = {
     { L"←  →", L"Previous / next visualiser" },
+    { L"C", L"Auto-cycle: new visualiser with each song" },
     { L"F  or  Alt+Enter", L"Toggle fullscreen (or double-click)" },
     { L"N", L"Next look (colours and shapes)" },
     { L"Space", L"Lock / unlock the current look" },

@@ -19,9 +19,11 @@ public:
     void ReleaseResources();
     void Resize(int width, int height);
 
-    void Select(int index, bool crossfade = true);
+    // Switch visualiser; with `animate`, plays a randomly chosen transition.
+    void Select(int index, bool animate = true);
     void Next() { Select((m_current + 1) % Count()); }
     void Previous() { Select((m_current + Count() - 1) % Count()); }
+    void SelectRandom();   // any visualiser other than the current one (auto-cycle)
     int Count() const { return static_cast<int>(m_slots.size()); }
     int Current() const { return m_current; }
     int FindByName(const std::wstring& name) const;
@@ -47,7 +49,7 @@ public:
     // (override with the VISUALIZER_GPU_BUDGET_MS environment variable, for testing).
     static constexpr float kDefaultGpuBudgetMs = 3.0f;
     static constexpr float kMinScale = 0.3f;
-    static constexpr float kFadeSeconds = 1.2f;
+    static constexpr int kTransitionStyles = 5;   // see Renderer::Composite
 
 private:
     struct Slot {
@@ -70,5 +72,10 @@ private:
     int m_width = 1, m_height = 1;
     int m_current = 0;
     int m_previous = -1;   // fading out, or -1
-    float m_fade = 1.0f;   // 0 -> 1 during a crossfade
+    float m_fade = 1.0f;   // 0 -> 1 during a transition
+    float m_fadeSeconds = 1.2f;
+    int m_style = 0;
+    float m_seed = 0.0f;
+    uint32_t m_rng = 0x9E3779B9u;
+    uint32_t Random();
 };

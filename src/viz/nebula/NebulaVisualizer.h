@@ -1,6 +1,7 @@
-#pragma once
+﻿#pragma once
 #include <wrl/client.h>
 #include <random>
+#include "render/RenderTarget.h"
 #include "viz/Visualizer.h"
 
 // Flying through a glowing gas nebula.
@@ -20,7 +21,7 @@ public:
     const wchar_t* Name() const override { return L"Nebula"; }
     bool CreateResources(ID3D11Device* device) override;
     void ReleaseResources() override;
-    float RenderScale() const override { return 0.6f; }   // soft gas tolerates upscaling well
+    float RenderScale() const override { return 0.5f; }   // TAA jitter recovers sub-pixel detail
     void Activate() override;
     void Update(const AudioFeatures& audio, float dt) override;
     void Render(Renderer& renderer, float time, float dt) override;
@@ -43,6 +44,21 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_cb;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_sampler;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_noise;
+
+    // Temporal accumulation (TAA): jittered raymarch -> resolve with reprojected history.
+    Microsoft::WRL::ComPtr<ID3D11Device> m_device;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_taaPS;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> m_taaCB;
+    Microsoft::WRL::ComPtr<ID3D11SamplerState> m_clamp;
+    RenderTarget m_current;      // this frame's raymarch: colour + gas distance
+    RenderTarget m_history[2];   // ping-pong accumulated image
+    int m_historyIndex = 0;
+    bool m_historyValid = false;
+    bool m_taaEnabled = true;
+    uint32_t m_frame = 0;
+    float m_prevBasis[3][3] = {};
+    double m_prevPos[3] = {};
+    float m_prevTanHalfFov = 1.0f;
 
     std::mt19937 m_rng;
 

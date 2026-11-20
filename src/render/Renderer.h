@@ -57,8 +57,9 @@ public:
     int BoundWidth() const { return m_boundW; }
     int BoundHeight() const { return m_boundH; }
     void DrawFullscreen(ID3D11PixelShader* ps);
-    // Draws layer a (or a->b crossfade by `mix`) scaled to the back buffer, with dithering.
-    void Composite(const CompositeLayer& a, const CompositeLayer* b, float mix);
+    // Draws layer a (or the a->b transition at `mix`, in `style`) scaled to the back buffer.
+    // Styles: 0 crossfade, 1 glitch cut, 2 zoom-through, 3 iris, 4 pixel dissolve.
+    void Composite(const CompositeLayer& a, const CompositeLayer* b, float mix, int style = 0, float seed = 0.0f);
 
     ID2D1DeviceContext* BeginOverlay();   // draws onto the back buffer; nullptr if unavailable
     void EndOverlay();

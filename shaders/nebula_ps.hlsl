@@ -18,12 +18,13 @@ cbuffer Nebula : register(b2) {   // matches NebulaConstants in NebulaVisualizer
     float3 colHot;      float ambient;
     float threshold;    float gain;  float warp;  float filament;
     float3 warpOffset;  float detail;
+    float2 jitter;      float frameIndex;  float nebulaPad;   // TAA: sub-pixel jitter (pixels), frame counter
 };
 
 Texture3D<float4> Noise : register(t0);
 SamplerState Wrap : register(s0);
 
-static const int kMaxSteps = 72;
+static const int kMaxSteps = 56;
 static const float kMaxDist = 34.0;
 
 float3 Palette(float t) {
@@ -77,13 +78,17 @@ float3 Stars(float3 rd) {
 
 float4 main(VSOut i) : SV_Target {
     float aspect = iResolution.x / iResolution.y;
-    float2 sp = float2((i.uv.x * 2.0 - 1.0) * aspect, 1.0 - i.uv.y * 2.0);
+    // Sub-pixel jitter changes every frame; the TAA resolve averages it into extra detail.
+    float2 uv = (i.pos.xy + jitter) / iResolution;
+    float2 sp = float2((uv.x * 2.0 - 1.0) * aspect, 1.0 - uv.y * 2.0);
     float3 rd = normalize(camFwd + (sp.x * camRight + sp.y * camUp) * tanHalfFov);
 
-    // Per-pixel random start offset hides step banding (stable, so it doesn't shimmer).
-    float t = 0.15 + 0.2 * Hash33(int3(i.pos.xy, 17)).x;
+    // Per-pixel start offset hides step banding. It changes every frame so the TAA resolve
+    // averages the grain away (rather than freezing it into a fixed pattern).
+    float t = 0.15 + 0.2 * InterleavedGradientNoise(i.pos.xy + frameIndex * 5.588238);
     float transmittance = 1.0;
     float3 col = 0;
+    float depthSum = 0.0, depthWeight = 0.0;   // opacity-weighted distance, for reprojection
 
     [loop] for (int s = 0; s < kMaxSteps; ++s) {
         float stepLen = 0.2 + t * 0.03;   // finer steps up close
@@ -112,6 +117,8 @@ float4 main(VSOut i) : SV_Target {
             float alphaGas = 1.0 - exp(-density * stepLen * absorb);
             float alphaAll = 1.0 - exp(-(density * absorb + dust * 1.5) * stepLen);
             col += transmittance * alphaGas * emission;
+            depthSum += transmittance * alphaAll * t;
+            depthWeight += transmittance * alphaAll;
             transmittance *= 1.0 - alphaAll;
             if (transmittance < 0.02) break;
         }
@@ -132,7 +139,9 @@ float4 main(VSOut i) : SV_Target {
     col = pow(saturate(col), 1.0 / 2.2);        // linear -> display
     float luma = dot(col, float3(0.2126, 0.7152, 0.0722));
     col = saturate(lerp(luma.xxx, col, 1.35));  // vibrance: push colours away from grey
-    float2 v = i.uv - 0.5;
-    col *= 1.0 - dot(v, v) * 0.7;               // vignette
-    return float4(col, 1);
+
+    // Alpha carries where the gas is (opacity-weighted distance); mostly empty pixels count as
+    // infinitely far, so they reproject by direction alone (stars, far haze).
+    float depth = depthWeight > 0.05 ? depthSum / depthWeight : 1000.0;
+    return float4(col, depth);   // vignette is applied after the TAA resolve
 }

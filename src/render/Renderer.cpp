@@ -11,7 +11,7 @@ constexpr UINT kSwapChainFlags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJ
 struct CompositeConstants {   // matches shaders/composite_ps.hlsl
     float uvScaleA[2], uvMaxA[2];
     float uvScaleB[2], uvMaxB[2];
-    float mix, hasB, pad[2];
+    float mix, hasB, style, seed;
 };
 
 template <typename T>
@@ -217,7 +217,7 @@ void Renderer::DrawFullscreen(ID3D11PixelShader* ps) {
     m_context->Draw(3, 0);
 }
 
-void Renderer::Composite(const CompositeLayer& a, const CompositeLayer* b, float mix) {
+void Renderer::Composite(const CompositeLayer& a, const CompositeLayer* b, float mix, int style, float seed) {
     BindTarget(m_backBufferRTV.Get(), m_width, m_height, 0.0f, 0.0f);
 
     CompositeConstants cc{};
@@ -229,6 +229,8 @@ void Renderer::Composite(const CompositeLayer& a, const CompositeLayer* b, float
     }
     cc.mix = mix;
     cc.hasB = b ? 1.0f : 0.0f;
+    cc.style = static_cast<float>(style);
+    cc.seed = seed;
     UploadConstants(m_context.Get(), m_compositeCB.Get(), cc);
 
     ID3D11ShaderResourceView* srvs[2] = { a.srv, b ? b->srv : nullptr };

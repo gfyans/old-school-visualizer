@@ -11,6 +11,7 @@ constexpr DXGI_FORMAT kTargetFormat = DXGI_FORMAT_R11G11B10_FLOAT;
 }
 
 VisualizerHost::VisualizerHost() {
+    m_rng ^= static_cast<uint32_t>(GetTickCount64());
     wchar_t buf[32];
     if (GetEnvironmentVariableW(L"VISUALIZER_GPU_BUDGET_MS", buf, ARRAYSIZE(buf)) > 0) {
         const float v = static_cast<float>(_wtof(buf));
@@ -61,18 +62,37 @@ int VisualizerHost::FindByName(const std::wstring& name) const {
     return -1;
 }
 
-void VisualizerHost::Select(int index, bool crossfade) {
+uint32_t VisualizerHost::Random() {   // xorshift: plenty for picking transitions
+    m_rng ^= m_rng << 13;
+    m_rng ^= m_rng >> 17;
+    m_rng ^= m_rng << 5;
+    return m_rng;
+}
+
+void VisualizerHost::Select(int index, bool animate) {
     if (index < 0 || index >= Count() || index == m_current) return;
-    m_previous = crossfade ? m_current : -1;
+    m_previous = animate ? m_current : -1;
     m_current = index;
-    m_fade = crossfade ? 0.0f : 1.0f;
+    m_fade = animate ? 0.0f : 1.0f;
+    if (animate) {
+        // A different transition each time; each style has its own natural length.
+        static constexpr float kSeconds[kTransitionStyles] = { 1.2f, 0.7f, 1.0f, 1.1f, 1.0f };
+        m_style = (m_style + 1 + static_cast<int>(Random() % (kTransitionStyles - 1))) % kTransitionStyles;
+        m_fadeSeconds = kSeconds[m_style];
+        m_seed = (Random() & 0xFFFF) / 65536.0f;
+    }
     m_slots[m_current].viz->Activate();
+}
+
+void VisualizerHost::SelectRandom() {
+    if (Count() < 2) return;
+    Select((m_current + 1 + static_cast<int>(Random() % (Count() - 1))) % Count());
 }
 
 void VisualizerHost::Update(const AudioFeatures& audio, float dt) {
     if (m_slots.empty()) return;
     if (m_previous >= 0) {
-        m_fade += dt / kFadeSeconds;
+        m_fade += dt / m_fadeSeconds;
         if (m_fade >= 1.0f) {
             m_fade = 1.0f;
             m_slots[m_previous].target.Reset();   // free its memory until it's shown again
@@ -157,7 +177,7 @@ void VisualizerHost::Render(Renderer& renderer, float time, float dt) {
         Slot& prev = m_slots[m_previous];
         RenderSlot(prev, renderer, time, dt);
         const CompositeLayer previous = LayerFor(prev);
-        renderer.Composite(previous, &current, m_fade);
+        renderer.Composite(previous, &current, m_fade, m_style, m_seed);
     } else {
         renderer.Composite(current, nullptr, 0.0f);
     }

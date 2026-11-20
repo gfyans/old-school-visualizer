@@ -1,6 +1,7 @@
 #include "viz/nebula/NebulaVisualizer.h"
 #include "render/Renderer.h"
 #include "g_nebula_ps.h"
+#include "g_nebula_taa_ps.h"
 #include "g_noise3d_cs.h"
 
 #include <algorithm>
@@ -26,8 +27,21 @@ struct NebulaConstants {   // matches cbuffer Nebula in nebula_ps.hlsl
     float colHot[3];     float ambient;
     float threshold, gain, warp, filament;
     float warpOffset[3]; float detail;
+    float jitter[2];     float frameIndex; float pad;
 };
 static_assert(sizeof(NebulaConstants) % 16 == 0);
+
+struct TaaConstants {   // matches cbuffer Taa in nebula_taa_ps.hlsl
+    float prevRight[3]; float prevTanHalfFov;
+    float prevUp[3];    float blend;
+    float prevFwd[3];   float historyValid;
+    float camDelta[3];  float pad;
+};
+static_assert(sizeof(TaaConstants) % 16 == 0);
+
+// Weight of each new frame in the accumulated image: lower = smoother but slower to react
+// (the neighbourhood clamp keeps beats and look changes responsive either way).
+constexpr float kTaaBlend = 0.15f;
 
 struct Palette {
     const wchar_t* name;
@@ -98,6 +112,11 @@ void Copy3(float* dst, const float* src) { memcpy(dst, src, 3 * sizeof(float)); 
 } // namespace
 
 NebulaVisualizer::NebulaVisualizer() : m_rng(std::random_device{}()) {
+    // Developer switch for before/after comparisons: VISUALIZER_TAA=0 disables accumulation.
+    wchar_t env[8];
+    if (GetEnvironmentVariableW(L"VISUALIZER_TAA", env, ARRAYSIZE(env)) > 0 && env[0] == L'0') m_taaEnabled = false;
+    // ...and VISUALIZER_SEED=<n> makes the look and flight path repeatable between runs.
+    if (GetEnvironmentVariableW(L"VISUALIZER_SEED", env, ARRAYSIZE(env)) > 0) m_rng.seed(_wtoi(env));
     m_paletteIndex = std::uniform_int_distribution<int>(0, kPaletteCount - 1)(m_rng);
     m_shapeIndex = std::uniform_int_distribution<int>(0, kShapeCount - 1)(m_rng);
     m_from = m_to = MakeLook(m_paletteIndex, m_shapeIndex);
@@ -119,6 +138,15 @@ bool NebulaVisualizer::CreateResources(ID3D11Device* device) {
     s.AddressU = s.AddressV = s.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
     s.MaxLOD = D3D11_FLOAT32_MAX;
     if (FAILED(device->CreateSamplerState(&s, &m_sampler))) return false;
+    s.AddressU = s.AddressV = s.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    if (FAILED(device->CreateSamplerState(&s, &m_clamp))) return false;
+
+    // Temporal accumulation resolve.
+    m_device = device;
+    if (FAILED(device->CreatePixelShader(g_nebula_taa_ps, sizeof(g_nebula_taa_ps), nullptr, &m_taaPS))) return false;
+    cb.ByteWidth = sizeof(TaaConstants);
+    if (FAILED(device->CreateBuffer(&cb, nullptr, &m_taaCB))) return false;
+    m_historyValid = false;
 
     // Noise volume: generated once by a compute shader (~1 MB, a few ms of GPU time).
     D3D11_TEXTURE3D_DESC td{};
@@ -149,15 +177,23 @@ bool NebulaVisualizer::CreateResources(ID3D11Device* device) {
 }
 
 void NebulaVisualizer::ReleaseResources() {
+    m_current.Reset();
+    m_history[0].Reset();
+    m_history[1].Reset();
+    m_taaCB.Reset();
+    m_taaPS.Reset();
+    m_clamp.Reset();
     m_noise.Reset();
     m_sampler.Reset();
     m_cb.Reset();
     m_ps.Reset();
+    m_device.Reset();
 }
 
 void NebulaVisualizer::Activate() {
     m_timeSinceChange = 0.0f;
     m_beatsSinceChange = 0;
+    m_historyValid = false;   // don't reproject a stale image from when it was last visible
 }
 
 NebulaVisualizer::Look NebulaVisualizer::CurrentLook() const {
@@ -285,7 +321,7 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
     }
 }
 
-void NebulaVisualizer::Render(Renderer& renderer, float, float) {
+void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
     const Look look = CurrentLook();
     const float* right = m_basis[0];
     const float* up = m_basis[1];
@@ -324,19 +360,85 @@ void NebulaVisualizer::Render(Renderer& renderer, float, float) {
     c.warpOffset[2] = m_swirl * 0.4f;
     c.detail = look.detail;
 
-    ID3D11DeviceContext* ctx = renderer.Context();
-    D3D11_MAPPED_SUBRESOURCE mapped;
-    if (SUCCEEDED(ctx->Map(m_cb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-        memcpy(mapped.pData, &c, sizeof(c));
-        ctx->Unmap(m_cb.Get(), 0);
+    // --- Temporal accumulation setup ---
+    ID3D11RenderTargetView* hostTarget = renderer.BoundTarget();
+    const int w = renderer.BoundWidth(), h = renderer.BoundHeight();
+    if (m_current.width != w || m_current.height != h) {
+        // 16-bit float: colour plus the gas distance (alpha) needed for reprojection.
+        m_current.Create(m_device.Get(), w, h, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        m_history[0].Create(m_device.Get(), w, h, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        m_history[1].Create(m_device.Get(), w, h, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        m_historyValid = false;
     }
-    ID3D11Buffer* cb = m_cb.Get();
-    ID3D11ShaderResourceView* srv = m_noise.Get();
-    ID3D11SamplerState* sampler = m_sampler.Get();
-    ctx->PSSetConstantBuffers(2, 1, &cb);
-    ctx->PSSetShaderResources(0, 1, &srv);
-    ctx->PSSetSamplers(0, 1, &sampler);
+    if (!m_current.rtv || !m_history[0].rtv || !m_history[1].rtv) return;
+
+    // Halton(2,3) sub-pixel jitter: 8 well-spread positions per cycle.
+    static constexpr float kHalton[8][2] = { { 0.500f, 0.333f }, { 0.250f, 0.667f }, { 0.750f, 0.111f }, { 0.125f, 0.444f },
+                                             { 0.625f, 0.778f }, { 0.375f, 0.222f }, { 0.875f, 0.556f }, { 0.0625f, 0.889f } };
+    ++m_frame;
+    c.jitter[0] = kHalton[m_frame % 8][0] - 0.5f;
+    c.jitter[1] = kHalton[m_frame % 8][1] - 0.5f;
+    c.frameIndex = static_cast<float>(m_frame % 1024);
+
+    TaaConstants taa{};
+    for (int i = 0; i < 3; ++i) {
+        taa.prevRight[i] = m_prevBasis[0][i];
+        taa.prevUp[i] = m_prevBasis[1][i];
+        taa.prevFwd[i] = m_prevBasis[2][i];
+        // The camera position wraps every 64 units; take the short way round.
+        double d = m_pos[i] - m_prevPos[i];
+        if (d > 32.0) d -= 64.0;
+        if (d < -32.0) d += 64.0;
+        taa.camDelta[i] = static_cast<float>(d);
+    }
+    taa.prevTanHalfFov = m_prevTanHalfFov;
+    taa.blend = m_taaEnabled ? kTaaBlend : 1.0f;
+    taa.historyValid = m_historyValid ? 1.0f : 0.0f;
+
+    ID3D11DeviceContext* ctx = renderer.Context();
+    auto upload = [&](ID3D11Buffer* buffer, const void* data, size_t size) {
+        D3D11_MAPPED_SUBRESOURCE mapped;
+        if (SUCCEEDED(ctx->Map(buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+            memcpy(mapped.pData, data, size);
+            ctx->Unmap(buffer, 0);
+        }
+    };
+    upload(m_cb.Get(), &c, sizeof(c));
+    upload(m_taaCB.Get(), &taa, sizeof(taa));
+    ID3D11Buffer* cbs[2] = { m_cb.Get(), m_taaCB.Get() };
+    ID3D11ShaderResourceView* none[2] = {};
+
+    // Pass 1: raymarch the gas (jittered) into the current-frame buffer.
+    renderer.BindTarget(m_current.rtv.Get(), w, h, time, dt);
+    ID3D11ShaderResourceView* noise = m_noise.Get();
+    ID3D11SamplerState* wrap = m_sampler.Get();
+    ctx->PSSetConstantBuffers(2, 2, cbs);
+    ctx->PSSetShaderResources(0, 1, &noise);
+    ctx->PSSetSamplers(0, 1, &wrap);
     renderer.DrawFullscreen(m_ps.Get());
+    ctx->PSSetShaderResources(0, 1, none);
+
+    // Pass 2: resolve against history -> host target (display) + new history (two outputs).
+    RenderTarget& prevHistory = m_history[m_historyIndex];
+    RenderTarget& nextHistory = m_history[1 - m_historyIndex];
+    renderer.BindTarget(hostTarget, w, h, time, dt);
+    ID3D11RenderTargetView* targets[2] = { hostTarget, nextHistory.rtv.Get() };
+    ctx->OMSetRenderTargets(2, targets, nullptr);
+    ID3D11ShaderResourceView* inputs[2] = { m_current.srv.Get(), prevHistory.srv.Get() };
+    ID3D11SamplerState* clamp = m_clamp.Get();
+    ctx->PSSetConstantBuffers(2, 2, cbs);
+    ctx->PSSetShaderResources(0, 2, inputs);
+    ctx->PSSetSamplers(0, 1, &clamp);
+    renderer.DrawFullscreen(m_taaPS.Get());
+    ctx->PSSetShaderResources(0, 2, none);
+    ctx->OMSetRenderTargets(1, &hostTarget, nullptr);
+    m_historyIndex = 1 - m_historyIndex;
+    m_historyValid = true;
+
+    // Remember this frame's camera for next frame's reprojection.
+    memcpy(m_prevBasis, m_basis, sizeof(m_basis));
+    memcpy(m_prevPos, m_pos, sizeof(m_pos));
+    m_prevTanHalfFov = c.tanHalfFov;
 }
 
 bool NebulaVisualizer::OnKey(UINT vk) {
