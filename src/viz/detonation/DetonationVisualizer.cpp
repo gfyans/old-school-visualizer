@@ -19,8 +19,9 @@ struct DetonationConstants {   // matches cbuffer Detonation in detonation_ps.hl
     float ringHit[4];
     float shockR, lights, flicker, spire;
     float glowCol[3];  float intensity;
+    float pulse, energy, pad[2];
 };
-static_assert(sizeof(DetonationConstants) == sizeof(float) * 40);
+static_assert(sizeof(DetonationConstants) == sizeof(float) * 44);
 
 const wchar_t* kLooks[] = { L"Night", L"Ink", L"Dusk" };
 constexpr int kLookCount = 3;
@@ -94,7 +95,11 @@ void DetonationVisualizer::Detonate() {
     m_flash = 0.7f;
     m_shake = 1.0f;
     m_charge = 0.0f;
+    m_peakCharge = 0.0f;
     m_regrow = 0.0f;
+    m_sinceBlast = 0.0f;
+    m_phraseBeats = 0;
+    m_kick = 1.0f;
     if (!m_locked && m_shot != Witness && m_shot != Orbit) Cut(Witness);   // watch it from a distance
     else if (!m_locked && m_shot == Witness) m_shotTime = std::min(m_shotTime, 4.0f);
 }
@@ -121,25 +126,52 @@ void DetonationVisualizer::Update(const AudioFeatures& audio, float dt) {
     const float tf = audio.tempoFactor;
     m_time += dt;
     m_shotTime += dt;
-    m_camTime += dt * tf;
+    m_camTime += dt * tf * (0.7f + 0.8f * m_intensity);   // the camera drifts faster when the song is big
     m_phaseTime += dt;
+    m_sinceBlast += dt;
     m_intensity = Smooth(m_intensity, audio.silent ? 0.0f : audio.intensity, dt, 1.0f, 2.0f);
+    m_energy = Smooth(m_energy, audio.silent ? 0.0f : std::min(1.0f, audio.bass * 1.3f), dt, 0.1f, 0.6f);
     m_pulse = Smooth(m_pulse, audio.beat, dt, 0.03f, 0.25f);
+    m_kick *= std::exp(-dt / 0.2f);
+    m_kickSmooth = Smooth(m_kickSmooth, m_kick, dt, 0.035f, 0.06f);
     m_flash *= std::exp(-dt / 0.25f);
     m_shake *= std::exp(-dt / 1.0f);
     for (float& a : m_ringAge) a += dt;
 
-    // Kicks: a ring out from the spire (or the void).
+    // Kicks: a ring out from the spire (or the dome's edge), and a punch through the dome.
     if (audio.beatCount != m_lastBeat) {
         m_lastBeat = audio.beatCount;
         for (int i = 3; i > 0; --i) { m_ringAge[i] = m_ringAge[i - 1]; m_ringHit[i] = m_ringHit[i - 1]; }
         m_ringAge[0] = 0.0f;
-        m_ringHit[0] = std::min(1.0f, 0.4f + 0.7f * audio.bass);
+        m_ringHit[0] = std::min(1.2f, 0.4f + 0.7f * audio.bass + 0.3f * m_intensity);
+        m_kick = std::max(m_kick, std::min(1.0f, 0.45f + 0.8f * audio.bass));
     }
+
+    // The beat grid, for phrase-timed cuts and blasts.
+    const bool gridLocked = audio.tempoConfidence > 0.4f;
+    if (audio.gridBeat != m_lastGrid) {
+        m_lastGrid = audio.gridBeat;
+        if (gridLocked) { ++m_beatsInShot; ++m_phraseBeats; }
+    }
+    const bool onDownbeat = audio.barPhase < m_lastBarPhase;
+    m_lastBarPhase = audio.barPhase;
+
+    // What sets off a blast: a drop; the release of a big build-up; a big section going on for a few
+    // phrases without one; or, failing all that, a minute of music.
+    bool blast = false;
     if (audio.dropCount != m_lastDrop) {
         m_lastDrop = audio.dropCount;
-        if (m_phase == Phase::Calm || m_phase == Phase::Void) Detonate();
+        blast = true;
     }
+    if (m_phase == Phase::Calm && !audio.silent) {
+        m_peakCharge = std::max(m_peakCharge, m_charge);
+        if (m_peakCharge > 0.5f && audio.buildUp < 0.2f && m_intensity > 0.35f) blast = true;   // the build-up let go
+        if (m_peakCharge > 0.0f && m_charge < 0.05f && !blast) m_peakCharge = 0.0f;
+        const bool phrase = gridLocked ? (onDownbeat && m_phraseBeats >= 32) : true;
+        if (phrase && m_sinceBlast > 22.0f && m_regrow > 0.5f && m_intensity > 0.5f) blast = true;
+        if (m_sinceBlast > 55.0f && m_intensity > 0.2f && (onDownbeat || !gridLocked)) blast = true;
+    }
+    if (blast && m_phase != Phase::Blast && m_freeze < 0.0f) Detonate();
 
     // Developer switch: hold one moment of a blast.
     if (m_freeze >= 0.0f) {
@@ -154,12 +186,12 @@ void DetonationVisualizer::Update(const AudioFeatures& audio, float dt) {
     switch (m_phase) {
     case Phase::Calm:
         m_charge = Smooth(m_charge, std::clamp((audio.buildUp - 0.1f) / 0.8f, 0.0f, 1.0f), dt, 0.6f, 1.5f);
-        m_regrow = std::min(1.0f, m_regrow + dt / 30.0f);   // the city rebuilds from the rim inwards
+        m_regrow = std::min(1.0f, m_regrow + dt / 16.0f);   // the city rebuilds from the rim inwards
         m_domeR = 0.0f;
         break;
     case Phase::Blast: {
         const float t = m_phaseTime;
-        m_domeR = m_domeStart + (m_domeMax - m_domeStart) * (1.0f - std::exp(-t * 1.4f));
+        m_domeR = m_domeStart + (m_domeMax - m_domeStart) * (1.0f - std::exp(-t * 1.4f)) + 0.8f * m_kickSmooth;
         m_shockR = m_domeR * 1.1f + t * 26.0f;
         m_cloudRing = t * 45.0f;
         m_domeWhite = 1.0f - Smoothstep(3.0f, 4.2f, t);   // inverts to the void
@@ -169,12 +201,12 @@ void DetonationVisualizer::Update(const AudioFeatures& audio, float dt) {
         break;
     }
     case Phase::Void: {
-        // Hangs there, breathing with the kicks, while the song stays big.
-        m_domeR = m_domeMax * (1.0f + 0.02f * m_pulse);
+        // Hangs there, punching out with every kick and swelling with the bass, while the song stays big.
+        m_domeR = m_domeMax * (1.0f + 0.06f * m_kickSmooth + 0.03f * m_energy);
         m_domeWhite = 0.0f;
         m_cloudRing = m_shockR = 0.0f;
         const float t = m_phaseTime;
-        if ((t > 8.0f && m_intensity < 0.45f) || t > 30.0f) { m_phase = Phase::Collapse; m_phaseTime = 0.0f; }
+        if ((t > 4.0f && m_intensity < 0.45f) || t > 18.0f) { m_phase = Phase::Collapse; m_phaseTime = 0.0f; }
         break;
     }
     case Phase::Collapse: {
@@ -198,14 +230,14 @@ void DetonationVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_pullBack = Smooth(m_pullBack, m_phase == Phase::Calm ? 0.0f : 18.0f, dt, 2.0f, 4.0f);
     m_swirl += dt * tf * (0.03f + 0.5f * m_charge * m_charge + (m_phase == Phase::Blast ? 0.15f : 0.0f));
 
-    // The director: cut on phrases (8 bars, on the downbeat), or after a while without a beat grid.
-    const bool gridLocked = audio.tempoConfidence > 0.4f;
-    if (audio.gridBeat != m_lastGrid) { m_lastGrid = audio.gridBeat; if (gridLocked) ++m_beatsInShot; }
-    const bool onDownbeat = audio.barPhase < m_lastBarPhase;
-    m_lastBarPhase = audio.barPhase;
+    // The director: cut on phrases (8 bars, on the downbeat; 4 when the song is big), or after a while
+    // without a beat grid.
+    const bool big = m_intensity > 0.6f;
+    const int phraseLen = big ? 16 : 32;
     const bool afterBlast = m_phase == Phase::Blast && m_phaseTime < 6.0f;
     if (!m_locked && !afterBlast &&
-        ((m_beatsInShot >= 32 && onDownbeat && m_shotTime > 10.0f) || (!gridLocked && m_shotTime > 20.0f) || m_shotTime > 40.0f))
+        ((m_beatsInShot >= phraseLen && onDownbeat && m_shotTime > (big ? 6.0f : 10.0f)) ||
+         (!gridLocked && m_shotTime > (big ? 12.0f : 20.0f)) || m_shotTime > 40.0f))
         PickShot();
     if (!m_locked && m_shot == Avenue && m_phase != Phase::Calm) PickShot();
 
@@ -238,6 +270,10 @@ void DetonationVisualizer::Update(const AudioFeatures& audio, float dt) {
     if (m_hasArt && m_look != 1)
         for (int i = 0; i < 3; ++i) c.glowCol[i] = 0.5f * c.glowCol[i] + 0.6f * m_art.hot[i];
     c.intensity = m_intensity;
+    c.pulse = m_kickSmooth;
+    c.energy = m_energy;
+    // A soft push in on the kicks when the song is big: a breath, not a jolt.
+    c.focal *= 1.0f + 0.025f * m_kickSmooth * Smoothstep(0.3f, 0.8f, m_intensity);
     memcpy(m_constants, &c, sizeof(c));
 }
 
@@ -323,7 +359,7 @@ bool DetonationVisualizer::OnKey(UINT vk) {
         m_message = kShots[m_shot];
         return true;
     case 'Q':
-        if (m_phase == Phase::Calm || m_phase == Phase::Void) Detonate();
+        if (m_phase != Phase::Blast) Detonate();
         return true;
     case VK_SPACE:
         m_locked = !m_locked;

@@ -21,9 +21,9 @@ It listens to whatever your PC is playing (Spotify, a browser, games…) and ren
   them filling the screen, each turning in a wave with kicks rippling across. Snares tear it, hi-hats flicker the
   glyphs, build-ups dissolve it, drops flash it inside out and flood the screen.
 * **Detonation**: a vast city at night around a glowing spire. Kicks send rings of light across the rooftops,
-  build-ups charge the spire and spiral the clouds, and a drop erupts a white dome that tears at the buildings on
-  its rim and blows a ring through the clouds, then turns to a black sphere with a burning rim before collapsing
-  into a crater the city rebuilds. Night, manga Ink or Dusk looks; the camera cuts between an orbit, an avenue
+  build-ups charge the spire and spiral the clouds, and a drop (or a build-up letting go, or a big phrase) erupts a
+  white dome that tears at the buildings on its rim and blows a ring through the clouds, then turns to a black
+  sphere whose burning rim punches out with every kick before it collapses into a crater the city rebuilds. Night, manga Ink or Dusk looks; the camera cuts between an orbit, an avenue
   flight, a rooftop skim, an overhead view and a distant witness.
 * **Spectrum**: classic bar spectrum.
 

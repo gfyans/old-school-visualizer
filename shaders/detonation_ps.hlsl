@@ -20,6 +20,7 @@ cbuffer Detonation : register(b2) {   // matches DetonationConstants in Detonati
     float4 ringHit;                     // their strengths
     float shockR;    float lights;      float flicker;   float spire;      // lights: share of windows lit; spire 0..1 standing
     float3 glowCol;  float intensity;   // window / city light colour
+    float pulse;     float energy;      float2 pad;                        // kick envelope 0..1; bass energy 0..1
 };
 
 static const float kTop = 16.0;        // tallest building (traversal slab)
@@ -48,7 +49,7 @@ float Rings(float r) {
     float s = 0.0;
     [unroll] for (int i = 0; i < 4; ++i) {
         float age = ringAge[i];
-        float d = r - age * kRingSpeed;
+        float d = r - domeOn * domeR - age * kRingSpeed;
         s += ringHit[i] * exp(-d * d * 0.35) * exp(-age * 0.9);
     }
     return s;
@@ -193,7 +194,7 @@ float DomeHalo(float3 ro, float3 rd, float tMax) {
     if (domeOn < 0.01) return 0.0;
     float tc = clamp(-dot(ro, rd), 0.0, tMax);
     float d = length(ro + rd * tc) - domeR;
-    return exp(-max(d, 0.0) * 0.12) * saturate(domeR * 0.2);
+    return exp(-max(d, 0.0) * (0.12 - 0.03 * pulse)) * saturate(domeR * 0.2) * (1.0 + 0.5 * pulse);
 }
 
 // Light the blast throws on a surface: from the dome (white-hot) or its burning rim on the ground (void).
@@ -203,7 +204,7 @@ float3 BlastLight(float3 p, float3 n, float3 hot) {
     float ds = max(length(p) - domeR, 0.3);
     float white = domeOn * domeWhite * 2.0 / (1.0 + 0.015 * ds * ds) * (0.25 + 0.75 * saturate(dot(n, toC)));
     float rimBand = r - domeR * 1.04;
-    float rim = domeOn * (1.0 - domeWhite) * 2.2 * exp(-rimBand * rimBand * 0.08) * (0.4 + 0.6 * saturate(n.y + dot(n, toC)));
+    float rim = domeOn * (1.0 - domeWhite) * (2.2 + 2.0 * pulse) * exp(-rimBand * rimBand * 0.08) * (0.4 + 0.6 * saturate(n.y + dot(n, toC)));
     return float3(1.0, 0.95, 0.88) * white + hot * rim;
 }
 
@@ -229,7 +230,7 @@ float4 Clouds(float3 ro, float3 rd, float3 hot, float3 cool) {
     float3 lightCol = glowCol * (0.12 + 0.25 * intensity) * exp(-r * 0.004);
     lightCol += cool * charge * 2.0 * exp(-r * 0.05);
     lightCol += float3(1.0, 0.95, 0.88) * domeOn * domeWhite * 4.0 * exp(-max(r - domeR, 0.0) * 0.03);
-    lightCol += hot * domeOn * (1.0 - domeWhite) * exp(-abs(r - domeR) * 0.08);
+    lightCol += hot * domeOn * (1.0 - domeWhite) * (1.0 + 2.0 * pulse) * exp(-abs(r - domeR) * 0.08);
     float bolt = step(0.93, Hash1(int2(floor(time * 9.0), 3), 77)) * charge;
     lightCol += cool * bolt * 2.0 * exp(-r * 0.02);
     lightCol += hot * ring * 2.5;
@@ -299,11 +300,14 @@ float4 main(VSOut i) : SV_Target {
         col = Sky(rd, L);
     } else if (h.kind == 5) {
         // The dome: white-hot with bands rolling up it, then a black void with a burning rim.
-        float bands = 0.75 + 0.25 * sin(p.y * 1.4 - time * 5.0 + 3.0 * Fbm(float2(atan2(p.z, p.x) * 6.0, p.y * 0.3)));
+        // Bands roll up it faster as the song drives harder; each kick flares it.
+        float ang = atan2(p.z, p.x);
+        float bands = 0.75 + 0.25 * sin(p.y * 1.4 - time * (5.0 + 6.0 * energy) + 3.0 * Fbm(float2(ang * 6.0, p.y * 0.3)));
         float facing = saturate(-dot(h.n, rd));
-        float3 white = lerp(L.hot * 2.0, float3(3.0, 2.9, 2.7), pow(facing, 0.6)) * bands;
-        float rimGlow = pow(1.0 - facing, 3.0);
-        float3 voidCol = L.hot * rimGlow * 3.0 + L.hot * 0.02;
+        float3 white = lerp(L.hot * 2.0, float3(3.0, 2.9, 2.7), pow(facing, 0.6)) * bands * (1.0 + 0.35 * pulse);
+        // The void: black, with a burning rim that swells with each kick.
+        float rimGlow = pow(1.0 - facing, 3.0 - 1.2 * pulse);
+        float3 voidCol = L.hot * rimGlow * (3.0 + 4.0 * pulse) + L.hot * 0.02;
         col = lerp(voidCol, white, domeWhite);
         inkFill = domeWhite > 0.5 ? 0.0 : (rimGlow > 0.55 ? 0.0 : 1.0);
         edge = abs(facing - 0.08) / max(fwidth(facing), 1e-4);
@@ -334,7 +338,7 @@ float4 main(VSOut i) : SV_Target {
                 inkTone = lerp(inkTone, inkTone + 0.12, lod);
             }
             if (n.y > 0.5) {   // roofs catch the kick rings and a little sky; a few blink for aircraft
-                emit += L.cool * Rings(r) * 0.9;
+                emit += lerp(L.cool, L.hot * 1.4, domeOn) * Rings(r) * 0.9;
                 albedo *= 1.3;
                 float beacon = step(0.9, hc.y) * step(length(uv - size * 0.5), max(0.05, footprint * 1.5));
                 emit += L.hot * 3.0 * beacon * step(0.5, frac(time * 0.5 + hc.z));
@@ -373,7 +377,7 @@ float4 main(VSOut i) : SV_Target {
                 albedo = 0.02;
                 emit += L.hot * step(0.9, Hash33(int3(floor(p * 7.0))).x) * (1.0 - regrow) * 0.8;
             }
-            emit += L.cool * Rings(r) * 1.2;
+            emit += lerp(L.cool, L.hot * 1.4, domeOn) * Rings(r) * 1.2;
             float2 e = min(f, 1.0 - f);
             edge = 9.0;
             inkTone = (m.x == 3 || m.y == 3) ? 0.18 : 0.5;
@@ -406,7 +410,7 @@ float4 main(VSOut i) : SV_Target {
     if (h.kind == 5) fog *= lerp(0.25, 1.0, domeWhite);   // the void stays black through the haze
     col = lerp(col, fogCol, fog);
     float halo = DomeHalo(ro, rd, h.t);
-    col += lerp(L.hot * 0.8, float3(1.1, 1.0, 0.95), domeWhite) * halo * domeOn * (h.kind == 5 ? 0.3 : 1.0);
+    col += lerp(L.hot * 0.8, float3(1.1, 1.0, 0.95), domeWhite) * halo * domeOn * (h.kind == 5 ? 0.12 + 0.18 * domeWhite : 1.0);
     // The shockwave out in front of the dome: a bright ring of dust at street level.
     if (shockR > 0.5) {
         float2 g = p.xz;

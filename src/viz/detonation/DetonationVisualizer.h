@@ -58,6 +58,12 @@ private:
     float m_charge = 0.0f, m_flash = 0.0f, m_shake = 0.0f;
     float m_swirl = 0.0f, m_intensity = 0.0f, m_pulse = 0.0f;
     float m_ringAge[4] = { 99, 99, 99, 99 }, m_ringHit[4] = {};
+    float m_kick = 0.0f;          // the last kick's strength, decaying
+    float m_kickSmooth = 0.0f;    // the dome's kick envelope: rises fast (not a jump), eases off
+    float m_energy = 0.0f;        // smoothed bass energy
+    float m_sinceBlast = 0.0f;    // seconds since the last blast started
+    float m_peakCharge = 0.0f;    // the highest charge of the current build-up
+    int m_phraseBeats = 0;        // grid beats since the last blast (for phrase-timed blasts)
 
     // The camera director.
     int m_shot = Orbit;
@@ -71,6 +77,6 @@ private:
     uint32_t m_lastBeat = 0, m_lastGrid = 0, m_lastDrop = 0;
     int m_beatsInShot = 0;
     float m_lastBarPhase = 0.0f;
-    float m_constants[40] = {};
+    float m_constants[44] = {};
     std::wstring m_message;
 };
