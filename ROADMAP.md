@@ -11,7 +11,6 @@ Where this is going next, in order. ✅ = done.
 3. **Album-art scenes.** The cover shatters into 3D voxels that pulse, orbit and reassemble on the downbeat.
 4. **Phone remote.** Scan a QR code and your phone becomes a controller on your home network: switch scenes, lock
    looks, trigger the quasar, supernova or detonation.
-5. **Rework Liquid.** Bring it up to the standard of the newer scenes; next to Signal and Detonation it looks plain.
 
 ## Later
 - **Shader workshop.** Hot-reload while music plays, import Shadertoy shaders with the audio mapped in, and have
@@ -34,7 +33,7 @@ Where this is going next, in order. ✅ = done.
   lock after beatless intros; ✅ tempo-driven pace; ✅ instrument detection (kick, snare, hats, voice, pads); ✅ key,
   chords and mood colour; ✅ now playing with album-art palettes; ✅ equaliser bars.
 - **Visualisers:** ✅ Nebula (TAA, light scattering, bloom, pulsar, supernova, directed flight); ✅ Neon Grid;
-  ✅ Liquid; ✅ Oscilloscope; ✅ Aurora; ✅ Galaxy; ✅ Fractal flights; ✅ Signal (skull, gas-mask head and brain models,
+  ✅ Liquid (a fluid simulation: Ink, Neon and Chrome); ✅ Oscilloscope; ✅ Aurora; ✅ Galaxy; ✅ Fractal flights; ✅ Signal (skull, gas-mask head and brain models,
   centre and grid layouts, ASCII / dither / LED / scan lines); ✅ Detonation (city, dome, void, crater, camera director; blasts on drops,
   released build-ups and big phrases; a dome that punches with the kicks);
   ✅ Spectrum (Studio and Radial looks; physical peak caps and drop fireworks).

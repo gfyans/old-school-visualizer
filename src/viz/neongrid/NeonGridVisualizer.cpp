@@ -256,6 +256,10 @@ void NeonGridVisualizer::Render(Renderer& renderer, float, float) {
 }
 
 bool NeonGridVisualizer::OnKey(UINT vk) {
+    if (vk == 'Q') {   // the drop's moment, by hand: the next update sees a "new" drop
+        m_lastDrop = ~0u;
+        return true;
+    }
     if (vk == 'N') {
         NextScheme(1.2f);
         m_message = m_hasArt && (m_scheme & 1) == 0 ? L"Album colours" : kSchemes[m_scheme].name;

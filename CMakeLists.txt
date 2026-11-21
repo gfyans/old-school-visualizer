@@ -48,8 +48,11 @@ compile_shader(nebula_taa_ps.hlsl ps_5_0 g_nebula_taa_ps)
 compile_shader(nebula_post_ps.hlsl ps_5_0 g_nebula_post_ps)
 compile_shader(noise3d_cs.hlsl    cs_5_0 g_noise3d_cs)
 compile_shader(eqbars_ps.hlsl     ps_5_0 g_eqbars_ps)
-compile_shader(feedback_warp_ps.hlsl ps_5_0 g_feedback_warp_ps)
-compile_shader(feedback_out_ps.hlsl  ps_5_0 g_feedback_out_ps)
+foreach(pass curl vorticity splat_vel splat_dye divergence pressure gradient advect_vel advect_dye)
+    string(TOUPPER ${pass} PASS_DEFINE)
+    compile_shader(liquid_sim_ps.hlsl ps_5_0 g_liquid_${pass}_ps PASS_${PASS_DEFINE})
+endforeach()
+compile_shader(liquid_display_ps.hlsl ps_5_0 g_liquid_display_ps)
 compile_shader(neongrid_ps.hlsl      ps_5_0 g_neongrid_ps)
 compile_shader(scope_beam_vs.hlsl    vs_5_0 g_scope_beam_vs)
 compile_shader(scope_beam_ps.hlsl    ps_5_0 g_scope_beam_ps)
@@ -92,7 +95,8 @@ add_executable(Visualizer WIN32
     src/viz/VisualizerHost.cpp
     src/viz/spectrum/SpectrumVisualizer.cpp
     src/viz/nebula/NebulaVisualizer.cpp
-    src/viz/feedback/FeedbackVisualizer.cpp
+    src/viz/liquid/LiquidVisualizer.cpp
+    src/capture/Screenshot.cpp
     src/viz/neongrid/NeonGridVisualizer.cpp
     src/viz/scope/ScopeVisualizer.cpp
     src/viz/aurora/AuroraVisualizer.cpp
@@ -130,7 +134,7 @@ if(SIGNAL_RC_DEPENDS)
 endif()
 
 target_include_directories(Visualizer PRIVATE src ${SHADER_OUT})
-target_link_libraries(Visualizer PRIVATE audio_analysis d3d11 dxgi d2d1 dwrite ole32 shell32 windowsapp mfplat mfreadwrite mfuuid winhttp bcrypt)
+target_link_libraries(Visualizer PRIVATE audio_analysis d3d11 dxgi d2d1 dwrite ole32 shell32 windowsapp mfplat mfreadwrite mfuuid winhttp bcrypt windowscodecs)
 target_compile_definitions(Visualizer PRIVATE VISUALIZER_VERSION="${PROJECT_VERSION}")
 set_source_files_properties(src/media/NowPlaying.cpp PROPERTIES COMPILE_OPTIONS /bigobj)   # C++/WinRT
 target_compile_definitions(Visualizer PRIVATE ${COMMON_DEFS})

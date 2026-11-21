@@ -6,8 +6,10 @@ It listens to whatever your PC is playing (Spotify, a browser, games…) and ren
 * **Nebula**: fly through a glowing volumetric gas cloud lit by a pulsing core, with light scattering and bloom. A pulsar's beams sweep in time with the bar, and drops set off a supernova.
 * **Neon Grid**: a synthwave night drive under neon gates, past low-poly mountains and a city skyline, towards a striped sun. The mountains are built from the music:
   each row of terrain is one moment's spectrum, entering at the horizon.
-* **Liquid**: Milkdrop-style feedback. Waveform ink is warped, faded and hue-shifted every frame into
-  tunnels, vortices, ripples and kaleidoscopes.
+* **Liquid**: coloured ink in moving water, a real fluid simulation. Emitters drifting round the screen trail ink
+  as loud as the music; kicks splash it outward into curling vortex pairs, snares drop in a contrasting colour,
+  hi-hats feather the edges, build-ups wind everything into a whirlpool and drops flood the screen with a burst
+  of new colour. Looks: Ink (pigment billowing in backlit water), Neon (glowing dye) and Chrome (liquid metal).
 * **Oscilloscope**: a vector display on an old CRT. The real waveform drives an electron beam with phosphor
   afterglow, behind curved glass. Modes: triggered waveform, X/Y vectorscope (the stereo field), dual trace and polar.
 * **Aurora**: soft ribbons of northern lights sweeping over a frozen forest lake, mirrored in the cracked ice. The calm one.
@@ -56,10 +58,10 @@ there's nothing to remember. `H` shows the few keys worth knowing plus the curre
 | `←` `→` | Previous / next visualiser (with a random transition: crossfade, glitch cut, zoom-through, iris or pixel dissolve) |
 | `C` | Scene changes: off → a new visualiser with each song (or every 4 minutes without track info) → **Random**: a random visualiser and look about every minute, switched at the start of a phrase or on a drop, never in the middle of a blast, supernova or quasar |
 | `F`, `Alt+Enter`, double-click | Toggle fullscreen |
-| `N` | Next look (Nebula: palette + gas shape; Neon Grid / Aurora: colour scheme; Liquid: preset; Oscilloscope: mode; Galaxy: shape + colours; Fractal flights: world; Signal: subject, style + palette; Detonation: Night / Ink / Dusk; Spectrum: Studio / Radial) |
+| `N` | Next look (Nebula: palette + gas shape; Neon Grid / Aurora: colour scheme; Liquid: Ink / Neon / Chrome; Oscilloscope: mode; Galaxy: shape + colours; Fractal flights: world; Signal: subject, style + palette; Detonation: Night / Ink / Dusk; Spectrum: Studio / Radial) |
 | `Space` | Lock / unlock the current look |
-| `M` | Galaxy, Detonation and Spectrum's Studio: next camera shot. Signal: centre / grid. Spectrum's Radial: colours |
-| `Q` | Galaxy: fire the quasar. Fractal flights: hyperspeed. Nebula: supernova. Detonation: detonate. Spectrum: fireworks (all as on a drop) |
+| `M` | Galaxy, Detonation and Spectrum's Studio: next camera shot. Signal: centre / grid. Spectrum's Radial and Liquid: colours |
+| `Q` | Galaxy: fire the quasar. Fractal flights: hyperspeed. Nebula: supernova. Detonation: detonate. Spectrum: fireworks. Liquid: burst. Signal: flash and flood. Neon Grid: glitch hit. Aurora: surge. Oscilloscope: beam flare (all as on a drop) |
 | `P` | Nebula: summon a pulsar |
 | `B` | Cyberpunk equaliser bars along the bottom (neon LED segments, glitch tears on hard hits) |
 | `R` | Record to MP4 (press again to stop and save) |
@@ -74,6 +76,7 @@ there's nothing to remember. `H` shows the few keys worth knowing plus the curre
 | `T` | Track titles on / off |
 | `D` | Cycle audio device: system default → each output → … |
 | `F1` | Stats: fps, resolution, GPU time, audio device, tempo, level and instrument meters |
+| `F12` | Save a screenshot to `Pictures\Visualizer` (the picture without on-screen text) |
 | `U` | Check for updates, or restart into one that's been downloaded |
 | `H` | Help |
 | `Esc` | Leave fullscreen, or quit |
@@ -186,7 +189,7 @@ Measured on an RTX 3080 at 2560×1440 fullscreen:
   jittered and blended with the reprojected previous result, which removes raymarch grain and recovers sub-pixel
   detail, so it looks the same as 60% did at about 30% less cost.
 * Neon Grid: about 1.7 ms GPU per frame (75% resolution, for crisp lines).
-* Liquid: about 0.06 ms GPU per frame.
+* Liquid: light (a 320 × 180 flow grid with 22 pressure steps, and ink at up to 720p; 75% resolution).
 * Oscilloscope: about 0.2 ms GPU per frame (full resolution, for thin beams).
 * Aurora: about 1.2 ms GPU per frame (60% resolution).
 * Galaxy: about 0.75 ms GPU per frame for a million particles at full resolution. Each star works out its own orbit in
@@ -244,6 +247,8 @@ Dev tools:
   0.25,0.08,0.17,0.17` and `stl_to_mesh.py brain.stl assets\brain.mesh --eyes none`.
   `VISUALIZER_SIGNAL_LOOK=<style 1-4>,<subject 0-2>[,<grid rows 0-4>]` fixes Signal's look for comparisons
   (subjects 0 skull, 1 gas mask, 2 brain).
+* `VISUALIZER_LIQUID=<look 0-2>` fixes Liquid's look. `VISUALIZER_SCREENSHOT_DIR=<folder>` sends `F12` screenshots
+  there (handy for tests: the app saves its own picture, even when the window is covered).
 * `VISUALIZER_DETONATION=<look 0-2>,<shot 0-4>[,<seconds into a blast>]` fixes Detonation's look and camera shot
   (and optionally holds one moment of a blast).
 

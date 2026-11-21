@@ -12,7 +12,7 @@
 //   modes (N)    -> triggered waveform, X/Y vectorscope (stereo field), dual trace (L/R), polar ring
 //   bass / beat  -> bigger, brighter trace
 //   build-up     -> longer phosphor persistence (trails smear out)
-//   drop         -> beam jitter and flash, new mode
+//   drop (or Q)  -> beam jitter and flash, new mode
 //   phrases      -> new phosphor colour (P1 green, P3 amber, P4 blue-white, P7, synth pink, album)
 class ScopeVisualizer : public IVisualizer {
 public:
@@ -27,7 +27,7 @@ public:
     void Render(Renderer& renderer, float time, float dt) override;
     bool OnKey(UINT vk) override;
     std::vector<VisualizerAction> Actions() const override {
-        return { { 'N', L"Next mode" }, { VK_SPACE, L"Lock / unlock the look" } };
+        return { { 'N', L"Next mode" }, { 'Q', L"Beam flare" }, { VK_SPACE, L"Lock / unlock the look" } };
     }
     std::wstring TakeMessage() override;
     std::wstring Status() const override;

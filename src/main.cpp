@@ -1,6 +1,7 @@
 #include "audio/AudioAnalyzer.h"
 #include "audio/AudioCapture.h"
 #include "capture/Recorder.h"
+#include "capture/Screenshot.h"
 #include "media/NowPlaying.h"
 #include "platform/FrameLimiter.h"
 #include "platform/Settings.h"
@@ -10,7 +11,7 @@
 #include "ui/Overlay.h"
 #include "update/Updater.h"
 #include "viz/VisualizerHost.h"
-#include "viz/feedback/FeedbackVisualizer.h"
+#include "viz/liquid/LiquidVisualizer.h"
 #include "viz/nebula/NebulaVisualizer.h"
 #include "viz/neongrid/NeonGridVisualizer.h"
 #include "viz/scope/ScopeVisualizer.h"
@@ -37,7 +38,7 @@ constexpr float kRandomSeconds = 60.0f;       // Random: about this long on each
 void RegisterVisualizers(VisualizerHost& host) {
     host.Add(std::make_unique<NebulaVisualizer>());
     host.Add(std::make_unique<NeonGridVisualizer>());
-    host.Add(std::make_unique<FeedbackVisualizer>());
+    host.Add(std::make_unique<LiquidVisualizer>());
     host.Add(std::make_unique<ScopeVisualizer>());
     host.Add(std::make_unique<AuroraVisualizer>());
     host.Add(std::make_unique<GalaxyVisualizer>());
@@ -146,6 +147,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     };
 
     bool showStats = false, showHelp = false;
+    bool screenshotPending = false;   // F12: saved once this frame is drawn
     // Stream mode (O): 1 = clean output for OBS (no on-screen text, a 1920x1080 window),
     // 2 = only the EQ bars on chroma-key green, to overlay on a stream.
     int streamMode = 0;
@@ -332,6 +334,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         case VK_RIGHT:   host.Next(); announce(); break;
         case VK_LEFT:    host.Previous(); announce(); break;
         case VK_F1:      showStats = !showStats; break;
+        case VK_F12:     screenshotPending = true; break;
         case 'H':        showHelp = !showHelp; break;
         case 'D':        cycleAudioDevice(); break;
         case 'B':
@@ -413,6 +416,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             case VK_LEFT: return L"\u2190";
             case VK_RIGHT: return L"\u2192";
             case VK_F1: return L"F1";
+            case VK_F12: return L"F12";
             case VK_ESCAPE: return L"Esc";
             default: return std::wstring(1, static_cast<wchar_t>(vk));
             }
@@ -490,6 +494,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         item(record, 'I', L"Instant replay", 'I', recorder.InstantReplay(), canRecord);
         item(record, 'S', L"Save the last 30 seconds", 'S', false, canRecord && recorder.InstantReplay());
         item(record, 'V', L"Video folder\u2026", 'V', false, canRecord);
+        sep(record);
+        item(record, VK_F12, L"Save a screenshot", VK_F12);
         sub(menu, record, L"Record");
         sep(menu);
 
@@ -656,6 +662,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         renderer.BindBackBuffer(host.HasRegions() ? &primary : nullptr);
         eqBars.Render(renderer);
         recorder.CaptureFrame(renderer);   // what's recorded: the visuals and bars, not the text overlays
+        if (screenshotPending) {   // likewise the screenshot
+            screenshotPending = false;
+            const std::wstring shot = Screenshot::Save(renderer, primary);
+            overlay.ShowMessage(shot.empty() ? std::wstring(L"Couldn't save the screenshot") : L"Screenshot saved to " + Recorder::ShortPath(shot), 3.0f);
+        }
         if (std::wstring note = recorder.TakeMessage(); !note.empty()) overlay.ShowMessage(note, 4.0f);
         if (std::wstring note = updater.TakeMessage(); !note.empty()) overlay.ShowMessage(note, 4.0f);
         if (recorder.Recording()) {

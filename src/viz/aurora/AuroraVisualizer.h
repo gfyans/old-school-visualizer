@@ -24,7 +24,7 @@ public:
     void Render(Renderer& renderer, float time, float dt) override;
     bool OnKey(UINT vk) override;
     std::vector<VisualizerAction> Actions() const override {
-        return { { 'N', L"Next colours" }, { VK_SPACE, L"Lock / unlock the look" } };
+        return { { 'N', L"Next colours" }, { 'Q', L"Surge" }, { VK_SPACE, L"Lock / unlock the look" } };
     }
     std::wstring TakeMessage() override;
     std::wstring Status() const override;

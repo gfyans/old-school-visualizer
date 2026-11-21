@@ -435,6 +435,10 @@ void SignalVisualizer::Render(Renderer& renderer, float time, float dt) {
 }
 
 bool SignalVisualizer::OnKey(UINT vk) {
+    if (vk == 'Q') {   // the drop's moment, by hand: the next update sees a "new" drop
+        m_lastDrop = ~0u;
+        return true;
+    }
     if (vk == 'N') {
         NextLook(true);
         m_message = std::wstring(kSubjects[m_nextSubject]) + L"  ·  " + kStyles[m_style] + L"  ·  " + kPalettes[m_palette].name;

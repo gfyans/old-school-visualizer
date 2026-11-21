@@ -13,7 +13,7 @@
 //   build-up    -> the picture dissolves cell by cell and tears harder
 //   drop        -> the palette flashes inside out, the screen floods with a grid, the subject changes
 //   phrases     -> new style and palette, centre <-> grid
-//   keys        -> N next look, M centre / grid, Space lock
+//   keys        -> N next look, M centre / grid, Q the drop's flash and flood, Space lock
 //
 // The skull, head and brain are models embedded from assets/cyberskull.mesh, gashead.mesh and brain.mesh
 // when the exe is built with them (third-party assets, kept out of git). Without them the skull and brain
@@ -30,7 +30,7 @@ public:
     void Render(Renderer& renderer, float time, float dt) override;
     bool OnKey(UINT vk) override;
     std::vector<VisualizerAction> Actions() const override {
-        return { { 'N', L"Next look" }, { 'M', L"Centre / grid" }, { VK_SPACE, L"Lock / unlock the look" } };
+        return { { 'N', L"Next look" }, { 'M', L"Centre / grid" }, { 'Q', L"Flash and flood" }, { VK_SPACE, L"Lock / unlock the look" } };
     }
     std::wstring TakeMessage() override;
     std::wstring Status() const override;

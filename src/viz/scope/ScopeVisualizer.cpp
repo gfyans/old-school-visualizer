@@ -330,6 +330,10 @@ void ScopeVisualizer::Render(Renderer& renderer, float time, float dt) {
 }
 
 bool ScopeVisualizer::OnKey(UINT vk) {
+    if (vk == 'Q') {   // the drop's moment, by hand: the next update sees a "new" drop
+        m_lastDrop = ~0u;
+        return true;
+    }
     if (vk == 'N') {
         m_mode = (m_mode + 1) % kModeCount;
         m_message = kModeNames[m_mode];
