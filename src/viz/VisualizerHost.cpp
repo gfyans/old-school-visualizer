@@ -53,7 +53,59 @@ void VisualizerHost::Resize(int width, int height) {
     m_height = std::max(1, height);
     // Targets are reallocated lazily in EnsureTarget; drop the invisible ones now to free memory.
     for (int i = 0; i < Count(); ++i)
-        if (i != m_current && i != m_previous) m_slots[i].target.Reset();
+        if (!IsShown(i)) m_slots[i].target.Reset();
+}
+
+bool VisualizerHost::IsShown(int index) const {
+    return index == m_current || index == m_previous ||
+           std::find(m_extra.begin(), m_extra.end(), index) != m_extra.end();
+}
+
+void VisualizerHost::SetRegions(const std::vector<RECT>& regions) {
+    m_regions = regions;
+    std::vector<int> old;
+    old.swap(m_extra);
+    for (size_t i = 1; i < m_regions.size(); ++i) {
+        // Keep what this monitor showed before if possible, otherwise the next unused visualiser.
+        int pick = i - 1 < old.size() ? old[i - 1] : -1;
+        if (pick < 0 || pick == m_current || pick == m_previous ||
+            std::find(m_extra.begin(), m_extra.end(), pick) != m_extra.end()) {
+            pick = -1;
+            for (int k = 1; k <= Count() && pick < 0; ++k) {
+                const int c = (m_current + static_cast<int>(i) * 3 + k) % Count();
+                if (c != m_current && c != m_previous && std::find(m_extra.begin(), m_extra.end(), c) == m_extra.end()) pick = c;
+            }
+        }
+        if (pick < 0) break;   // more monitors than visualisers: the rest stay black
+        const bool wasShown = IsShown(pick);
+        m_extra.push_back(pick);
+        if (!wasShown) m_slots[pick].viz->Activate();
+    }
+    for (int i = 0; i < Count(); ++i)
+        if (!IsShown(i)) m_slots[i].target.Reset();
+}
+
+void VisualizerHost::ShuffleExtras() {
+    if (m_extra.empty()) return;
+    std::vector<int> pool;
+    for (int i = 0; i < Count(); ++i) if (i != m_current && i != m_previous) pool.push_back(i);
+    for (size_t i = pool.size(); i > 1; --i) std::swap(pool[i - 1], pool[Random() % i]);
+    for (size_t i = 0; i < m_extra.size() && i < pool.size(); ++i) {
+        if (std::find(m_extra.begin(), m_extra.end(), pool[i]) == m_extra.end()) m_slots[pool[i]].viz->Activate();
+        m_extra[i] = pool[i];
+    }
+    for (int i = 0; i < Count(); ++i)
+        if (!IsShown(i)) m_slots[i].target.Reset();
+}
+
+RECT VisualizerHost::PrimaryRegion() const {
+    if (!m_regions.empty()) return m_regions[0];
+    return RECT{ 0, 0, m_width, m_height };
+}
+
+void VisualizerHost::SetBase(Slot& slot, const RECT* region) {
+    slot.baseW = region ? std::max(1, static_cast<int>(region->right - region->left)) : 0;
+    slot.baseH = region ? std::max(1, static_cast<int>(region->bottom - region->top)) : 0;
 }
 
 int VisualizerHost::FindByName(const std::wstring& name) const {
@@ -71,6 +123,12 @@ uint32_t VisualizerHost::Random() {   // xorshift: plenty for picking transition
 
 void VisualizerHost::Select(int index, bool animate) {
     if (index < 0 || index >= Count() || index == m_current) return;
+    // Already on another monitor: swap the two (no transition, or it would be drawn twice).
+    for (int& e : m_extra) {
+        if (e != index) continue;
+        e = m_current;
+        animate = false;
+    }
     m_previous = animate ? m_current : -1;
     m_current = index;
     m_fade = animate ? 0.0f : 1.0f;
@@ -86,7 +144,11 @@ void VisualizerHost::Select(int index, bool animate) {
 
 void VisualizerHost::SelectRandom() {
     if (Count() < 2) return;
-    Select((m_current + 1 + static_cast<int>(Random() % (Count() - 1))) % Count());
+    // Prefer one that isn't already on another monitor.
+    for (int tries = 0; tries < 16; ++tries) {
+        const int c = (m_current + 1 + static_cast<int>(Random() % (Count() - 1))) % Count();
+        if (std::find(m_extra.begin(), m_extra.end(), c) == m_extra.end() || tries == 15) { Select(c); return; }
+    }
 }
 
 void VisualizerHost::Update(const AudioFeatures& audio, float dt) {
@@ -101,11 +163,13 @@ void VisualizerHost::Update(const AudioFeatures& audio, float dt) {
     }
     m_slots[m_current].viz->Update(audio, dt);
     if (m_previous >= 0) m_slots[m_previous].viz->Update(audio, dt);
+    for (int e : m_extra) m_slots[e].viz->Update(audio, dt);
 }
 
 void VisualizerHost::ViewportSize(const Slot& slot, int& w, int& h) const {
-    w = std::max(1, static_cast<int>(std::lround(m_width * slot.scale)));
-    h = std::max(1, static_cast<int>(std::lround(m_height * slot.scale)));
+    const int bw = slot.baseW > 0 ? slot.baseW : m_width, bh = slot.baseH > 0 ? slot.baseH : m_height;
+    w = std::max(1, static_cast<int>(std::lround(bw * slot.scale)));
+    h = std::max(1, static_cast<int>(std::lround(bh * slot.scale)));
 }
 
 int VisualizerHost::ActiveRenderWidth() const { int w, h; ViewportSize(m_slots[m_current], w, h); return w; }
@@ -114,8 +178,9 @@ int VisualizerHost::ActiveRenderHeight() const { int w, h; ViewportSize(m_slots[
 void VisualizerHost::EnsureTarget(Slot& slot) {
     // Allocate at the preferred scale; dynamic scaling renders into a sub-rectangle of it.
     const float pref = slot.viz->RenderScale();
-    const int w = std::max(1, static_cast<int>(std::lround(m_width * pref)));
-    const int h = std::max(1, static_cast<int>(std::lround(m_height * pref)));
+    const int bw = slot.baseW > 0 ? slot.baseW : m_width, bh = slot.baseH > 0 ? slot.baseH : m_height;
+    const int w = std::max(1, static_cast<int>(std::lround(bw * pref)));
+    const int h = std::max(1, static_cast<int>(std::lround(bh * pref)));
     if (slot.target.width != w || slot.target.height != h)
         slot.target.Create(m_device, w, h, kTargetFormat);
 }
@@ -169,16 +234,27 @@ CompositeLayer VisualizerHost::LayerFor(const Slot& slot) const {
 
 void VisualizerHost::Render(Renderer& renderer, float time, float dt) {
     if (m_slots.empty() || !m_device) return;
+    const RECT* primary = m_regions.empty() ? nullptr : &m_regions[0];
+    if (primary) renderer.ClearBackBuffer();   // gaps between monitors of different sizes
     Slot& cur = m_slots[m_current];
+    SetBase(cur, primary);
     RenderSlot(cur, renderer, time, dt);
     const CompositeLayer current = LayerFor(cur);
 
     if (m_previous >= 0) {
         Slot& prev = m_slots[m_previous];
+        SetBase(prev, primary);
         RenderSlot(prev, renderer, time, dt);
         const CompositeLayer previous = LayerFor(prev);
-        renderer.Composite(previous, &current, m_fade, m_style, m_seed);
+        renderer.Composite(previous, &current, m_fade, m_style, m_seed, primary);
     } else {
-        renderer.Composite(current, nullptr, 0.0f);
+        renderer.Composite(current, nullptr, 0.0f, 0, 0.0f, primary);
+    }
+
+    for (size_t i = 0; i < m_extra.size() && i + 1 < m_regions.size(); ++i) {
+        Slot& s = m_slots[m_extra[i]];
+        SetBase(s, &m_regions[i + 1]);
+        RenderSlot(s, renderer, time, dt);
+        renderer.Composite(LayerFor(s), nullptr, 0.0f, 0, 0.0f, &m_regions[i + 1]);
     }
 }

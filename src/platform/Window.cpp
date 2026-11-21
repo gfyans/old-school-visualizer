@@ -1,4 +1,7 @@
 #include "platform/Window.h"
+#include <shobjidl.h>
+#include <wrl/client.h>
+#include <algorithm>
 
 namespace {
 constexpr wchar_t kClassName[] = L"VisualizerWindow";
@@ -67,7 +70,7 @@ void Window::SetFullscreen(bool on) {
 
         MONITORINFO mi{ sizeof(mi) };
         GetMonitorInfoW(MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
-        const RECT& m = mi.rcMonitor;
+        const RECT m = m_hasArea ? m_area : mi.rcMonitor;
 
         m_fullscreen = true;
         SetWindowLongPtrW(m_hwnd, GWL_STYLE, (m_savedStyle & ~WS_OVERLAPPEDWINDOW) | WS_POPUP);
@@ -80,6 +83,85 @@ void Window::SetFullscreen(bool on) {
         SetWindowPos(m_hwnd, nullptr, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
     }
+    if (onFullscreenChanged) onFullscreenChanged(m_fullscreen);
+}
+
+void Window::SetClientSize(int w, int h) {
+    if (m_fullscreen) return;
+    if (!m_hasSavedSize) { GetWindowPlacement(m_hwnd, &m_sizeBefore); m_hasSavedSize = true; }
+    if (IsZoomed(m_hwnd)) ShowWindow(m_hwnd, SW_RESTORE);
+    RECT r{ 0, 0, w, h };
+    AdjustWindowRectExForDpi(&r, static_cast<DWORD>(GetWindowLongPtrW(m_hwnd, GWL_STYLE)), FALSE, 0, GetDpiForWindow(m_hwnd));
+    SetWindowPos(m_hwnd, nullptr, 0, 0, r.right - r.left, r.bottom - r.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void Window::RestoreSize() {
+    if (!m_hasSavedSize) return;
+    m_hasSavedSize = false;
+    if (!m_fullscreen) SetWindowPlacement(m_hwnd, &m_sizeBefore);
+}
+
+void Window::SetFullscreenArea(const RECT* area) {
+    m_hasArea = area != nullptr;
+    if (area) m_area = *area;
+    if (!m_fullscreen) return;
+    RECT m = m_area;
+    if (!m_hasArea) {
+        MONITORINFO mi{ sizeof(mi) };
+        GetMonitorInfoW(MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+        m = mi.rcMonitor;
+    }
+    SetWindowPos(m_hwnd, HWND_TOP, m.left, m.top, m.right - m.left, m.bottom - m.top,
+        SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    if (onFullscreenChanged) onFullscreenChanged(true);
+}
+
+std::wstring Window::PickFolder(HWND owner, const wchar_t* title, const std::wstring& start) {
+    Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) return {};
+    DWORD options = 0;
+    dialog->GetOptions(&options);
+    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+    dialog->SetTitle(title);
+    Microsoft::WRL::ComPtr<IShellItem> folder;
+    if (!start.empty() && SUCCEEDED(SHCreateItemFromParsingName(start.c_str(), nullptr, IID_PPV_ARGS(&folder))))
+        dialog->SetFolder(folder.Get());
+    if (FAILED(dialog->Show(owner))) return {};   // cancelled
+    Microsoft::WRL::ComPtr<IShellItem> result;
+    PWSTR path = nullptr;
+    std::wstring chosen;
+    if (SUCCEEDED(dialog->GetResult(&result)) && SUCCEEDED(result->GetDisplayName(SIGDN_FILESYSPATH, &path))) chosen = path;
+    CoTaskMemFree(path);
+    return chosen;
+}
+
+std::vector<MonitorDesc> Window::Monitors() {
+    std::vector<MonitorDesc> list;
+    EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR mon, HDC, LPRECT, LPARAM user) -> BOOL {
+        MONITORINFOEXW mi{};
+        mi.cbSize = sizeof(mi);
+        if (GetMonitorInfoW(mon, &mi))
+            reinterpret_cast<std::vector<MonitorDesc>*>(user)->push_back({ mi.rcMonitor, mi.szDevice, (mi.dwFlags & MONITORINFOF_PRIMARY) != 0 });
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&list));
+    std::sort(list.begin(), list.end(), [](const MonitorDesc& a, const MonitorDesc& b) {
+        if (a.primary != b.primary) return a.primary;
+        return a.rect.left < b.rect.left;
+    });
+    // Developer switch for testing multi-monitor modes on one screen: VISUALIZER_FAKE_MONITORS=<n>
+    // splits the primary monitor into n side-by-side "monitors".
+    wchar_t env[8];
+    if (!list.empty() && GetEnvironmentVariableW(L"VISUALIZER_FAKE_MONITORS", env, ARRAYSIZE(env)) > 0) {
+        const int n = std::clamp(_wtoi(env), 1, 4);
+        const RECT whole = list[0].rect;
+        list.clear();
+        for (int i = 0; i < n; ++i) {
+            const LONG w = whole.right - whole.left;
+            RECT r{ whole.left + w * i / n, whole.top, whole.left + w * (i + 1) / n, whole.bottom };
+            list.push_back({ r, L"\\\\.\\FAKE" + std::to_wstring(i + 1), i == 0 });
+        }
+    }
+    return list;
 }
 
 LRESULT CALLBACK Window::StaticWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {

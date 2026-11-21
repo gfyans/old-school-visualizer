@@ -6,11 +6,13 @@ Ideas for where this could go, roughly in order of impact. ✅ = done.
 - ✅ **Tempo and beat-grid tracking.** Lock to the song's BPM and *predict* beats, so motion lands exactly on them (including moves across 4/8 bars).
 - ✅ **Song structure.** Detect build-ups and drops: tighten and accelerate during a build, explode into a new look on the drop.
 - ✅ **Real-music tuning.** Recorder and replay tools; tracker, confidence and structure calibrated on six real songs.
-- **Harder rhythms.** Beat placement on thrash metal and syncopated techno (occasional quarter-beat slips), e.g. a
-  look-ahead dynamic-programming phase stage. Lock faster after a beatless intro.
-- **Mood and key.** Minor/slow songs pull towards calm, cool palettes; energetic tracks go warm and fast. Chord changes shift hue.
+- **Harder rhythms.** Beat placement on thrash metal and syncopated techno (occasional quarter-beat slips).
+  - ✅ **Lock faster after a beatless intro.** Trust builds faster than it falls (mean grid F 0.43 → 0.47).
+  - Tried and rejected on the recordings: a second-order (tempo-trimming) phase lock (worse on hip-hop).
+  - Still open: a look-ahead dynamic-programming phase stage for thrash and syncopated techno.
+- ✅ **Mood and key.** Key and chords from a chroma profile; minor/slow songs cool the picture, energetic ones warm it; chord changes nudge the hue (`K`).
   - ✅ **Tempo-driven pace.** Every scene's motion scales with the song's BPM (half-time locks corrected).
-- **Instrument separation.** Real-time source separation (kick, snare, vocals, synths) so each can drive its own visual element.
+- ✅ **Instrument detection.** Lightweight DSP detectors for kick, snare, hi-hats, voice and pads, each driving its own details. (True source separation with a neural model was left out to keep the exe small and light.)
 - ✅ **Now playing.** Read title and album art from Windows media controls; take the palette from the album art; show the title at song start.
 - ✅ **Equaliser bars overlay.** Stylish glass bars along the bottom, over any visualiser (`B`).
 
@@ -38,8 +40,10 @@ Ideas for where this could go, roughly in order of impact. ✅ = done.
 - **Screensaver build.** The same exe as a `.scr`.
 
 ## 5. Beyond the screen
-- **Multi-monitor.** Span monitors, or a different visualiser on each.
+- ✅ **Multi-monitor.** Choose the monitor, a different visualiser on each, or one spanning all (`W`, `G`).
 - **RGB sync.** Drive SteelSeries / Razer / Hue lighting from the same analysis and palette.
-- **Stream / capture mode.** Chroma-key or transparent window for OBS; one-key 30 s clip recording.
+- ✅ **Stream / capture mode.** MP4 recording with the music (`R`), instant replay of the last 30 s (`I`, `S`), and a
+  stream mode for OBS: clean output or EQ bars on chroma-key green (`O`).
+  - Maybe later: a truly transparent window (DirectComposition) instead of chroma key.
 - **Shader hot-reload and live editor.** Write visualisers while music plays; load Shadertoy shaders with audio mapped in.
 - **AI visualiser generation.** Describe a scene and have Claude write the shader into the framework.

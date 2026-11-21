@@ -92,7 +92,7 @@ void AuroraVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_time += dt;
     m_mids = Smooth(m_mids, 0.5f * (audio.lowMid + audio.highMid), dt, 0.3f, 1.0f);
     m_bass = Smooth(m_bass, audio.bass, dt, 0.08f, 0.5f);
-    m_treble = Smooth(m_treble, audio.treble, dt, 0.05f, 0.4f);
+    m_treble = Smooth(m_treble, std::max(audio.treble * 0.6f, audio.hat), dt, 0.05f, 0.4f);
     m_buildUp = Smooth(m_buildUp, audio.buildUp, dt, 0.6f, 0.4f);
 
     // Beats send a flare racing along the curtains (predicted grid beats when locked).
@@ -127,9 +127,9 @@ void AuroraVisualizer::Update(const AudioFeatures& audio, float dt) {
     // Slow, smooth drivers: auroras move gracefully even when the music doesn't.
     const float speed = audio.silent ? 0.35f : 0.5f + 1.2f * m_mids + 0.8f * m_buildUp;
     m_anim += dt * speed * audio.tempoFactor;   // faster songs animate faster
-    const float targetBright = audio.silent ? 0.45f : 0.55f + 0.5f * audio.intensity + 0.35f * m_bass + 0.4f * m_buildUp + 0.8f * m_surge;
+    const float targetBright = audio.silent ? 0.45f : 0.55f + 0.5f * audio.intensity + 0.35f * m_bass + 0.4f * m_buildUp + 0.8f * m_surge + 0.35f * audio.vocal;
     m_brightness = Smooth(m_brightness, targetBright, dt, 0.25f, 1.2f);
-    m_sway = Smooth(m_sway, 0.8f + 0.7f * m_mids, dt, 1.0f, 2.0f);
+    m_sway = Smooth(m_sway, 0.8f + 0.7f * m_mids + 0.3f * audio.pad, dt, 1.0f, 2.0f);
     m_height = Smooth(m_height, 1.0f + 0.5f * m_buildUp + 0.25f * m_surge, dt, 0.8f, 1.5f);
     m_ripple = Smooth(m_ripple, 0.25f + 0.9f * m_bass, dt, 0.1f, 0.8f);
 

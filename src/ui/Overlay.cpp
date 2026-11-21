@@ -15,9 +15,15 @@ const wchar_t* const kHelpLines[][2] = {
     { L"N", L"Next look (colours and shapes)" },
     { L"Space", L"Lock / unlock the current look" },
     { L"B", L"Equaliser bars along the bottom" },
+    { L"W  /  G", L"Multi-monitor mode  /  next monitor" },
+    { L"K", L"Mood colour on / off" },
+    { L"O", L"Stream mode: clean / bars on green / off" },
     { L"D", L"Cycle audio device" },
     { L"A", L"Album-art colours on / off" },
     { L"T", L"Track titles on / off" },
+    { L"R", L"Record to MP4 (again to stop and save)" },
+    { L"I  /  S", L"Instant replay on / off  /  save last 30 s" },
+    { L"V", L"Choose where videos are saved" },
     { L"F1", L"Stats" },
     { L"H", L"This help" },
     { L"Esc", L"Leave fullscreen / quit" },
@@ -83,7 +89,7 @@ void Overlay::Update(float dt) {
 }
 
 bool Overlay::HasContent(bool stats, bool help) const {
-    return stats || help || !m_message.empty() || !m_trackTitle.empty();
+    return stats || help || !m_message.empty() || !m_trackTitle.empty() || !m_indicator.empty();
 }
 
 void Overlay::DrawText(ID2D1DeviceContext* ctx, const std::wstring& text, IDWriteTextFormat* format,
@@ -97,11 +103,12 @@ void Overlay::DrawText(ID2D1DeviceContext* ctx, const std::wstring& text, IDWrit
 }
 
 void Overlay::Draw(ID2D1DeviceContext* ctx, int width, int height, const OverlayStats& stats,
-                   const AudioFeatures& audio, bool showStats, bool showHelp, float bottomInset) {
+                   const AudioFeatures& audio, bool showStats, bool showHelp, float bottomInset,
+                   float originX, float originY) {
     if (!m_brush || !m_dwrite) return;
     const float scale = height / kDesignHeight;
     const float w = width / scale;   // layout width in design units
-    ctx->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale));
+    ctx->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) * D2D1::Matrix3x2F::Translation(originX, originY));
     ctx->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
 
     if (!m_message.empty()) {
@@ -125,6 +132,14 @@ void Overlay::Draw(ID2D1DeviceContext* ctx, int width, int height, const Overlay
         ctx->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x - 18 + slide, y + 8, x - 14 + slide, y + 80), 2, 2), m_brush.Get());
         DrawText(ctx, m_trackTitle, m_trackFormat.Get(), D2D1::RectF(x + slide, y, x + boxW, y + 48), opacity);
         DrawText(ctx, m_trackArtist, m_artistFormat.Get(), D2D1::RectF(x + slide, y + 50, x + boxW, y + 84), opacity * 0.75f);
+    }
+    if (!m_indicator.empty()) {
+        // Top-right status: a red dot while recording, a grey one for the replay buffer.
+        const float x = w - 300.0f, y = 40.0f;
+        const float pulse = m_indicatorRec ? 0.6f + 0.4f * std::fabs(std::sin(static_cast<float>(GetTickCount64() % 100000) * 0.003f)) : 0.5f;
+        m_brush->SetColor(m_indicatorRec ? D2D1::ColorF(1.0f, 0.15f, 0.15f, pulse) : D2D1::ColorF(0.8f, 0.8f, 0.8f, 0.5f));
+        ctx->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x, y + 22), 9, 9), m_brush.Get());
+        DrawText(ctx, m_indicator, m_bodyFormat.Get(), D2D1::RectF(x + 22, y, w - 20, y + 44), 0.9f);
     }
     if (showStats) DrawStats(ctx, stats, audio);
     if (showHelp) DrawHelp(ctx, w, kDesignHeight);
@@ -155,7 +170,7 @@ void Overlay::DrawStats(ID2D1DeviceContext* ctx, const OverlayStats& s, const Au
         s.sampleRate, a.silent ? L"  (silent)" : L"", a.beatCount,
         tempo, a.buildUp, a.dropCount);
 
-    const D2D1_RECT_F panel = D2D1::RectF(24, 24, 24 + 560, 24 + 355);
+    const D2D1_RECT_F panel = D2D1::RectF(24, 24, 24 + 560, 24 + 355 + 88);
     m_brush->SetColor(D2D1::ColorF(0, 0, 0, 0.55f));
     ctx->FillRoundedRectangle(D2D1::RoundedRect(panel, 8, 8), m_brush.Get());
     DrawText(ctx, buf, m_monoFormat.Get(), D2D1::RectF(panel.left + 16, panel.top + 12, panel.right - 16, panel.bottom), 1.0f);
@@ -169,6 +184,10 @@ void Overlay::DrawStats(ID2D1DeviceContext* ctx, const OverlayStats& s, const Au
         { L"treb", a.treble, D2D1::ColorF(0.35f, 0.75f, 1.0f) },
         { L"level", a.level, D2D1::ColorF(0.9f, 0.9f, 0.9f) },
         { L"inten", a.intensity, D2D1::ColorF(0.65f, 0.5f, 1.0f) },
+        { L"snare", a.snare, D2D1::ColorF(1.0f, 0.5f, 0.8f) },     // instrument detectors
+        { L"hat", a.hat, D2D1::ColorF(0.9f, 1.0f, 0.6f) },
+        { L"vocal", a.vocal, D2D1::ColorF(1.0f, 0.85f, 0.6f) },
+        { L"pad", a.pad, D2D1::ColorF(0.5f, 0.8f, 0.9f) },
     };
     float y = panel.top + 215;
     for (const Meter& m : meters) {
@@ -193,7 +212,7 @@ void Overlay::DrawStats(ID2D1DeviceContext* ctx, const OverlayStats& s, const Au
 
 void Overlay::DrawHelp(ID2D1DeviceContext* ctx, float width, float height) {
     const float rowH = 40.0f;
-    const float panelW = 720.0f;
+    const float panelW = 800.0f;
     const float panelH = 110.0f + rowH * ARRAYSIZE(kHelpLines);
     const D2D1_RECT_F panel = D2D1::RectF((width - panelW) / 2, (height - panelH) / 2,
                                           (width + panelW) / 2, (height + panelH) / 2);

@@ -45,6 +45,24 @@ void AudioAnalyzer::ConfigureBands(float sampleRate) {
     // Onset beats look at the kick-drum range.
     m_fluxLo = std::max(1, int(40.0f / binHz));
     m_fluxHi = std::max(m_fluxLo + 1, int(180.0f / binHz) + 1);
+    // Harmony: map each bin to its nearest pitch class (A4 = 440 Hz = MIDI 69).
+    for (int k = 0; k < kBins; ++k) {
+        const float hz = k * binHz;
+        m_binPitch[k] = -1;
+        if (hz < 150.0f || hz > 5000.0f) continue;
+        const int midi = static_cast<int>(std::lround(12.0f * std::log2(hz / 440.0f) + 69.0f));
+        m_binPitch[k] = static_cast<signed char>(((midi % 12) + 12) % 12);
+    }
+    // Instruments: snare body and snap, hi-hats, and the vocal range.
+    auto band = [&](FluxBand& b, float lo, float hi) {
+        b.lo = std::clamp(int(lo / binHz), 1, kBins - 1);
+        b.hi = std::clamp(int(hi / binHz) + 1, b.lo + 1, kBins);
+    };
+    band(m_snareBody, 150.0f, 350.0f);
+    band(m_snareNoise, 1500.0f, 5000.0f);
+    band(m_hatBand, 7000.0f, 16000.0f);
+    m_vocalLo = std::clamp(int(300.0f / binHz), 1, kBins - 1);
+    m_vocalHi = std::clamp(int(3400.0f / binHz) + 1, m_vocalLo + 1, kBins);
     // Structure detection: bass (to 200 Hz) and the "riser" range (2–12 kHz).
     m_bassBinHi = std::max(2, int(200.0f / binHz));
     m_highBinLo = std::max(1, int(2000.0f / binHz));
@@ -137,6 +155,9 @@ void AudioAnalyzer::Update(const float* samples, float sampleRate, bool newData,
         m_fluxVar += a * (d * d - m_fluxVar);
     }
 
+    UpdateInstruments(newData, dt);
+    UpdateHarmony(dt);
+
     // --- Beat grid ---
     const BeatTracker::State& grid = m_beats.GetState();
     f.bpm = grid.bpm;
@@ -169,6 +190,180 @@ void AudioAnalyzer::Update(const float* samples, float sampleRate, bool newData,
     for (int k = 1; k < kBins; ++k) totalP += m_power[k];
     UpdateStructure(float(bassP), float(highP), float(totalP), dt);
     UpdateWaveform(samples, sampleRate, dt);
+}
+
+void AudioAnalyzer::UpdateInstruments(bool newData, float dt) {
+    AudioFeatures& f = m_features;
+    m_sinceSnare += dt;
+    m_sinceHat += dt;
+    f.snare *= std::exp(-dt / 0.15f);
+    f.hat *= std::exp(-dt / 0.08f);
+    if (f.silent) {
+        f.vocal = Smooth(f.vocal, 0.0f, dt, 0.1f, 0.5f);
+        f.pad = Smooth(f.pad, 0.0f, dt, 0.1f, 0.5f);
+        return;
+    }
+
+    if (newData) {
+        // Band-limited spectral flux (rise in log magnitude), each with a ~1 s adaptive threshold.
+        // Bins far below the loudest band are clamped to a floor, so a faint click in a near-silent
+        // band (e.g. the edge of a kick) can't look like a big jump.
+        const float floorPower = std::pow(10.0f, (m_referenceDb - 42.0f) / 10.0f);
+        float logMag[kBins];
+        for (int k = 1; k < kBins; ++k) logMag[k] = 0.5f * std::log(std::max(m_power[k], floorPower));
+        auto flux = [&](FluxBand& b) {
+            float sum = 0.0f;
+            for (int k = b.lo; k < b.hi; ++k) sum += std::max(0.0f, logMag[k] - m_prevInstLog[k]);
+            b.value = sum / float(b.hi - b.lo);
+        };
+        flux(m_snareBody);
+        flux(m_snareNoise);
+        flux(m_hatBand);
+        // Snare / clap: the body and the noisy snap jump together. Hi-hat: a jump up top on its own.
+        const bool warm = m_activeTime > 1.0f;   // let the thresholds settle first
+        // ...and the band must be audible in the mix, not just a faint click (tilted like the
+        // spectrum, +10 dB around 10 kHz, so it compares fairly with the loudest band).
+        auto audible = [&](const FluxBand& b, float tiltDb, float belowDb) {
+            double p = 0.0;
+            for (int k = b.lo; k < b.hi; ++k) p += m_power[k];
+            return ToDb(float(p / (b.hi - b.lo))) + tiltDb > m_referenceDb - belowDb;
+        };
+        const bool snare = warm && m_snareNoise.Spike(2.0f) && m_snareBody.Spike(1.0f) && m_sinceSnare > 0.12f &&
+                           audible(m_snareNoise, 4.5f, 30.0f);
+        const bool hat = warm && !snare && m_hatBand.Spike(2.0f) && m_sinceHat > 0.05f && audible(m_hatBand, 10.0f, 30.0f);
+        if (snare) { f.snare = 1.0f; ++f.snareCount; m_sinceSnare = 0.0f; }
+        if (hat) { f.hat = 1.0f; ++f.hatCount; m_sinceHat = 0.0f; }
+        const float a = 1.0f - std::exp(-dt / 1.0f);
+        for (FluxBand* b : { &m_snareBody, &m_snareNoise, &m_hatBand }) {
+            const float d = b->value - b->mean;
+            b->mean += a * d;
+            b->var += a * (d * d - b->var);
+        }
+        for (int k = 1; k < kBins; ++k) m_prevInstLog[k] = logMag[k];
+    }
+
+    // Vocal range (300-3400 Hz): how tonal it is (spectral flatness: peaky = tonal), how present
+    // (share of the total), and how much its loudness moves (voices pulse with syllables at a
+    // few per second; pads and held notes stay steady).
+    double sum = 0.0, logSum = 0.0, total = 0.0;
+    for (int k = m_vocalLo; k < m_vocalHi; ++k) {
+        sum += m_power[k];
+        logSum += std::log(double(m_power[k]) + 1e-14);
+    }
+    for (int k = 1; k < kBins; ++k) total += m_power[k];
+    const int n = m_vocalHi - m_vocalLo;
+    const float flatness = float(std::exp(logSum / n) / (sum / n + 1e-14));
+    m_tonal = Smooth(m_tonal, std::clamp((0.25f - flatness) / 0.2f, 0.0f, 1.0f), dt, 0.1f, 0.3f);
+    m_vocalPresence = Smooth(m_vocalPresence, std::clamp(float(sum / (total + 1e-14)) * 2.5f, 0.0f, 1.0f), dt, 0.1f, 0.4f);
+    // Syllable-rate movement: band-pass the loudness envelope to roughly 3-8 Hz (difference of
+    // two smoothers) and measure how much is left. Beats are slower, hi-hats far faster, pads flat.
+    const float db = ToDb(float(sum / n));
+    if (m_vocalFast < -99.0f) m_vocalFast = m_vocalSlow = db;
+    m_vocalFast = Smooth(m_vocalFast, db, dt, 0.02f, 0.02f);   // ~8 Hz
+    m_vocalSlow = Smooth(m_vocalSlow, db, dt, 0.055f, 0.055f); // ~3 Hz
+    const float band = m_vocalFast - m_vocalSlow;
+    m_vocalMod = Smooth(m_vocalMod, band * band, dt, 0.3f, 0.6f);
+    const float pulsing = std::clamp((std::sqrt(m_vocalMod) - 0.8f) / 1.6f, 0.0f, 1.0f);
+    const float base = m_tonal * m_vocalPresence;
+    f.vocal = Smooth(f.vocal, base * pulsing, dt, 0.08f, 0.4f);
+    f.pad = Smooth(f.pad, base * (1.0f - pulsing), dt, 0.3f, 0.8f);
+}
+
+// Key (Krumhansl-Kessler key profiles against a ~10 s chroma average), chords (major/minor triads
+// against a ~0.4 s average, changing only once a new one holds for a moment) and an overall mood.
+void AudioAnalyzer::UpdateHarmony(float dt) {
+    AudioFeatures& f = m_features;
+    if (f.silent) { f.mood = Smooth(f.mood, 0.0f, dt, 2.0f, 2.0f); return; }
+
+    // Chroma from spectral peaks only (a note smears over neighbouring bins, which at these
+    // frequencies are wider than a semitone), each peak's frequency refined between bins.
+    float chroma[12] = {};
+    double total = 0.0, centroid = 0.0, all = 0.0;
+    const float binHz = m_configuredRate / kFftSize;
+    for (int k = 1; k < kBins; ++k) {
+        const float mag = std::sqrt(m_power[k]);
+        all += mag;
+        centroid += mag * k;
+        if (m_binPitch[k] < 0 || k + 1 >= kBins) continue;
+        if (m_power[k] <= m_power[k - 1] || m_power[k] < m_power[k + 1]) continue;
+        const float la = std::log(m_power[k - 1] + 1e-12f), lb = std::log(m_power[k] + 1e-12f), lc = std::log(m_power[k + 1] + 1e-12f);
+        const float denom = la - 2.0f * lb + lc;
+        const float offset = std::fabs(denom) > 1e-6f ? std::clamp(0.5f * (la - lc) / denom, -0.5f, 0.5f) : 0.0f;
+        const float hz = (k + offset) * binHz;
+        const int midi = static_cast<int>(std::lround(12.0f * std::log2(hz / 440.0f) + 69.0f));
+        chroma[((midi % 12) + 12) % 12] += mag;
+        total += mag;
+    }
+    // Brightness: spectral centroid, 0 (dark, ~500 Hz) .. 1 (bright, ~4 kHz).
+    const float centroidHz = all > 0.0 ? float(centroid / all) * (m_configuredRate / kFftSize) : 0.0f;
+    m_brightness = Smooth(m_brightness, std::clamp(std::log2(std::max(centroidHz, 1.0f) / 500.0f) / 3.0f, 0.0f, 1.0f), dt, 1.0f, 1.0f);
+    if (total <= 1e-9) return;
+    // Tonal frames count fully; noisy (drum-heavy) frames count less.
+    const float weight = 0.25f + 0.75f * m_tonal;
+    const float aLong = (1.0f - std::exp(-dt / 10.0f)) * weight, aShort = (1.0f - std::exp(-dt / 0.4f)) * weight;
+    for (int i = 0; i < 12; ++i) {
+        const float c = chroma[i] / float(total);
+        m_chromaLong[i] += aLong * (c - m_chromaLong[i]);
+        m_chromaShort[i] += aShort * (c - m_chromaShort[i]);
+    }
+
+    // Key: correlate the long chroma with each rotation of the major and minor profiles.
+    static constexpr float kMajor[12] = { 6.35f, 2.23f, 3.48f, 2.33f, 4.38f, 4.09f, 2.52f, 5.19f, 2.39f, 3.66f, 2.29f, 2.88f };
+    static constexpr float kMinor[12] = { 6.33f, 2.68f, 3.52f, 5.38f, 2.60f, 3.53f, 2.54f, 4.75f, 3.98f, 2.69f, 3.34f, 3.17f };
+    auto correlate = [&](const float* profile, int root) {
+        float mx = 0, my = 0;
+        for (int i = 0; i < 12; ++i) { mx += m_chromaLong[i]; my += profile[i]; }
+        mx /= 12; my /= 12;
+        float sxy = 0, sxx = 0, syy = 0;
+        for (int i = 0; i < 12; ++i) {
+            const float x = m_chromaLong[(i + root) % 12] - mx, y = profile[i] - my;
+            sxy += x * y; sxx += x * x; syy += y * y;
+        }
+        return sxy / std::sqrt(sxx * syy + 1e-12f);
+    };
+    float best = -2, second = -2;
+    int bestKey = 0;
+    bool bestMinor = false;
+    for (int root = 0; root < 12; ++root) {
+        for (int m = 0; m < 2; ++m) {
+            const float r = correlate(m ? kMinor : kMajor, root);
+            if (r > best) { second = best; best = r; bestKey = root; bestMinor = m == 1; }
+            else if (r > second) second = r;
+        }
+    }
+    f.key = bestKey;
+    f.minorKey = bestMinor;
+    f.keyConfidence = Smooth(f.keyConfidence, std::clamp(best * 1.2f - 0.2f, 0.0f, 1.0f) * std::clamp((best - second) * 8.0f, 0.0f, 1.0f),
+                             dt, 1.0f, 1.0f);
+
+    // Chord: best matching triad in the short chroma; a change must hold for 0.2 s.
+    float bestScore = -1;
+    int bestChord = 0;   // root * 2 + minor
+    for (int root = 0; root < 12; ++root) {
+        for (int m = 0; m < 2; ++m) {
+            const float score = m_chromaShort[root] + m_chromaShort[(root + (m ? 3 : 4)) % 12] + m_chromaShort[(root + 7) % 12];
+            if (score > bestScore) { bestScore = score; bestChord = root * 2 + m; }
+        }
+    }
+    const int current = f.chordRoot * 2 + (f.chordMinor ? 1 : 0);
+    if (bestChord != current && bestScore > 0.42f && m_tonal > 0.2f) {
+        if (bestChord != m_chordCandidate) { m_chordCandidate = bestChord; m_chordHold = 0.0f; }
+        m_chordHold += dt;
+        if (m_chordHold > 0.2f) {
+            f.chordRoot = bestChord / 2;
+            f.chordMinor = (bestChord & 1) != 0;
+            ++f.chordCount;
+            m_chordCandidate = -1;
+        }
+    } else {
+        m_chordCandidate = -1;
+    }
+
+    // Mood: major/minor (as far as we're sure), tempo, how big the section is and how bright it sounds.
+    const float majorness = (f.minorKey ? -1.0f : 1.0f) * f.keyConfidence;
+    const float target = std::clamp(1.6f * (0.45f * majorness + 0.9f * (f.tempoFactor - 1.0f) + 0.6f * (f.intensity - 0.45f) + 0.4f * (m_brightness - 0.5f)),
+                                    -1.0f, 1.0f);
+    f.mood = Smooth(f.mood, target, dt, 3.0f, 3.0f);
 }
 
 void AudioAnalyzer::UpdateWaveform(const float* samples, float sampleRate, float dt) {

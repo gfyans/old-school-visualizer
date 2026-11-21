@@ -22,13 +22,17 @@ file(MAKE_DIRECTORY ${SHADER_OUT})
 file(GLOB SHADER_INCLUDES ${SHADER_DIR}/*.hlsli)
 set(SHADER_HEADERS)
 
-# compile_shader(<file.hlsl> <profile> <variable name>)
+# compile_shader(<file.hlsl> <profile> <variable name> [NAME=VALUE defines...])
 function(compile_shader src profile var)
     set(out ${SHADER_OUT}/${var}.h)
+    set(defs)
+    foreach(d ${ARGN})
+        list(APPEND defs /D ${d})
+    endforeach()
     add_custom_command(
         OUTPUT ${out}
         COMMAND ${FXC} /nologo /O3 /Qstrip_reflect /Qstrip_debug
-                /T ${profile} /E main /I ${SHADER_DIR}
+                /T ${profile} /E main /I ${SHADER_DIR} ${defs}
                 /Vn ${var} /Fh ${out} ${SHADER_DIR}/${src}
         DEPENDS ${SHADER_DIR}/${src} ${SHADER_INCLUDES}
         COMMENT "fxc ${src}"
@@ -56,6 +60,9 @@ compile_shader(galaxy_vs.hlsl        vs_5_0 g_galaxy_vs)
 compile_shader(galaxy_ps.hlsl        ps_5_0 g_galaxy_ps)
 compile_shader(galaxy_out_ps.hlsl    ps_5_0 g_galaxy_out_ps)
 compile_shader(fractal_ps.hlsl       ps_5_0 g_fractal_ps)
+compile_shader(capture_blit_ps.hlsl  ps_5_0 g_capture_blit_ps)
+compile_shader(capture_yuv_ps.hlsl   ps_5_0 g_capture_y_ps PLANE=0)
+compile_shader(capture_yuv_ps.hlsl   ps_5_0 g_capture_uv_ps PLANE=1)
 
 # ---------------------------------------------------------------------------
 # Audio analysis (pure C++, shared with tests)
@@ -87,13 +94,14 @@ add_executable(Visualizer WIN32
     src/viz/aurora/AuroraVisualizer.cpp
     src/viz/galaxy/GalaxyVisualizer.cpp
     src/viz/fractal/FractalVisualizer.cpp
+    src/capture/Recorder.cpp
     src/media/NowPlaying.cpp
     res/app.rc
     ${SHADER_HEADERS})
 set_source_files_properties(res/app.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/res/app.ico)
 
 target_include_directories(Visualizer PRIVATE src ${SHADER_OUT})
-target_link_libraries(Visualizer PRIVATE audio_analysis d3d11 dxgi d2d1 dwrite ole32 shell32 windowsapp)
+target_link_libraries(Visualizer PRIVATE audio_analysis d3d11 dxgi d2d1 dwrite ole32 shell32 windowsapp mfplat mfreadwrite mfuuid)
 set_source_files_properties(src/media/NowPlaying.cpp PROPERTIES COMPILE_OPTIONS /bigobj)   # C++/WinRT
 target_compile_definitions(Visualizer PRIVATE ${COMMON_DEFS})
 target_compile_options(Visualizer PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_OPTS}>)

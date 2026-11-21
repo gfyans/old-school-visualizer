@@ -157,7 +157,7 @@ void FeedbackVisualizer::Update(const AudioFeatures& audio, float dt) {
 
     m_bass = Smooth(m_bass, audio.bass, dt, 0.03f, 0.25f);
     m_mids = Smooth(m_mids, 0.5f * (audio.lowMid + audio.highMid), dt, 0.1f, 0.5f);
-    m_treble = Smooth(m_treble, audio.treble, dt, 0.02f, 0.2f);
+    m_treble = Smooth(m_treble, std::max(audio.treble * 0.6f, audio.hat), dt, 0.02f, 0.2f);
     m_buildUp = Smooth(m_buildUp, audio.buildUp, dt, 0.5f, 0.3f);
     const float tf = audio.tempoFactor;   // faster songs animate faster
     m_hue += dt * tf * (0.01f + 0.03f * m_mids);

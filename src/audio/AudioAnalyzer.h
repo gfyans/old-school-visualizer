@@ -2,6 +2,7 @@
 #include "audio/AudioFeatures.h"
 #include "audio/BeatTracker.h"
 #include "audio/Fft.h"
+#include <cmath>
 #include <complex>
 
 // Turns recent mono audio into AudioFeatures: FFT, log-spaced bands, automatic
@@ -32,6 +33,8 @@ private:
     void ConfigureBands(float sampleRate);
     void UpdateWaveform(const float* samples, float sampleRate, float dt);
     void UpdateStructure(float bassPower, float highPower, float totalPower, float dt);
+    void UpdateInstruments(bool newData, float dt);
+    void UpdateHarmony(float dt);
 
     Fft m_fftEngine{ kFftSize };
     float m_window[kFftSize];
@@ -45,6 +48,25 @@ private:
     int m_fluxLo = 1, m_fluxHi = 2;
     int m_bassBinHi = 2, m_highBinLo = 3, m_highBinHi = 4;
     float m_prevLogMag[kBins] = {};
+
+    // Instrument detectors: band-limited spectral flux with adaptive thresholds.
+    struct FluxBand {
+        int lo = 1, hi = 2;
+        float mean = 0, var = 0, value = 0;
+        bool Spike(float k) const { return value > mean + k * std::sqrt(var) + 0.04f; }
+    };
+    FluxBand m_snareBody, m_snareNoise, m_hatBand;
+    float m_prevInstLog[kBins] = {};
+    int m_vocalLo = 1, m_vocalHi = 2;
+
+    // Harmony: pitch-class profile (chroma) per bin, long (key) and short (chord) averages.
+    signed char m_binPitch[kBins] = {};   // pitch class 0..11, or -1 outside 150 Hz - 5 kHz
+    float m_chromaLong[12] = {}, m_chromaShort[12] = {};
+    int m_chordCandidate = -1;
+    float m_chordHold = 0;
+    float m_brightness = 0;
+    float m_sinceSnare = 1, m_sinceHat = 1;
+    float m_vocalFast = -100, m_vocalSlow = -100, m_vocalMod = 0, m_tonal = 0, m_vocalPresence = 0;
 
     // Adaptive state
     float m_referenceDb = -50.0f;

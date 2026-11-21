@@ -18,8 +18,16 @@ struct AudioFeatures {
     bool silent = true;    // digital silence (nothing playing)
 
     // --- Onset beats (reactive: fire when a hit is heard) ---
-    float beat = 0;        // 1 on a detected beat, decays to 0 in ~0.15 s
+    float beat = 0;        // 1 on a detected beat (the kick drum), decays to 0 in ~0.15 s
     uint32_t beatCount = 0;
+
+    // --- Instruments (lightweight DSP detectors: good for drums, rough for voice vs synth) ---
+    float snare = 0;            // 1 on a snare / clap hit, decays in ~0.15 s
+    uint32_t snareCount = 0;
+    float hat = 0;              // 1 on a hi-hat / shaker / ride hit, decays in ~0.08 s
+    uint32_t hatCount = 0;
+    float vocal = 0;            // 0..1: a voice-like sound (tonal, pulsing with syllables) in the vocal range
+    float pad = 0;              // 0..1: sustained tonal sound (pads, held synths, strings)
 
     // --- Beat grid (predictive: locked to the song's tempo) ---
     float bpm = 0;              // 0 until a tempo is found
@@ -32,6 +40,15 @@ struct AudioFeatures {
     // 1.25 at 155 (clamped 0.7..1.4). Glides when the tempo changes, holds through beatless
     // breaks, and eases back to 1 in silence. Multiply animation rates by it.
     float tempoFactor = 1;
+
+    // --- Harmony and mood ---
+    int key = 0;                // 0..11 = C, C#, D ... B (the song's key, from the last ~10 s)
+    bool minorKey = false;
+    float keyConfidence = 0;    // 0..1
+    int chordRoot = 0;          // current chord (major or minor triad), 0..11
+    bool chordMinor = false;
+    uint32_t chordCount = 0;    // increments on every chord change
+    float mood = 0;             // -1 calm / dark (slow, minor) .. +1 bright / energetic (fast, major, loud)
 
     // --- Song structure ---
     float buildUp = 0;          // 0..1: rising tension (risers, rolls, bass pulled out)

@@ -32,11 +32,16 @@ public:
     void ShowMessage(const std::wstring& text, float seconds = 2.5f);
     // Now-playing caption, shown for a few seconds when a song starts.
     void ShowTrack(const std::wstring& title, const std::wstring& artist, float seconds = 7.0f);
+    // A persistent status in the top-right corner (e.g. "REC 0:42"); empty hides it.
+    void SetIndicator(const std::wstring& text, bool recording) { m_indicator = text; m_indicatorRec = recording; }
+    void ClearTransient() { m_message.clear(); m_trackTitle.clear(); }   // drop messages and captions now
     void Update(float dt);
     bool HasContent(bool stats, bool help) const;
     // bottomInset: design-space pixels (1080p) kept clear at the bottom, e.g. for the EQ bars.
+    // originX/Y: top-left of the area to draw in (multi-monitor: the primary monitor's region).
     void Draw(ID2D1DeviceContext* ctx, int width, int height, const OverlayStats& stats,
-              const AudioFeatures& audio, bool showStats, bool showHelp, float bottomInset = 0.0f);
+              const AudioFeatures& audio, bool showStats, bool showHelp, float bottomInset = 0.0f,
+              float originX = 0.0f, float originY = 0.0f);
 
 private:
     void DrawText(ID2D1DeviceContext* ctx, const std::wstring& text, IDWriteTextFormat* format,
@@ -49,6 +54,8 @@ private:
     Microsoft::WRL::ComPtr<IDWriteTextFormat> m_trackFormat, m_artistFormat;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_brush;
 
+    std::wstring m_indicator;
+    bool m_indicatorRec = false;
     std::wstring m_message;
     float m_messageTime = 0, m_messageDuration = 0;
     std::wstring m_trackTitle, m_trackArtist;

@@ -1,4 +1,4 @@
-﻿#include "audio/BeatTracker.h"
+#include "audio/BeatTracker.h"
 
 #include <algorithm>
 #include <cmath>
@@ -197,10 +197,12 @@ void BeatTracker::EstimateTempo() {
         score[lag] = (ac[lag] + 0.5f * twice) / ac[0] * prior;
         if (score[lag] > score[best]) best = lag;
     }
-    // Parabolic interpolation for a fractional period.
+    // Parabolic interpolation for a fractional period, on the unweighted autocorrelation (the
+    // tempo preference picks the peak, but would pull its exact position towards 120 BPM).
     float period = static_cast<float>(best);
     if (best > lagMin && best < lagMax) {
-        const float a = score[best - 1], b = score[best], c = score[best + 1];
+        auto raw = [&](int lag) { return ac[lag] + 0.5f * (2 * lag <= lagTop ? ac[2 * lag] : 0.0f); };
+        const float a = raw(best - 1), b = raw(best), c = raw(best + 1);
         const float denom = a - 2.0f * b + c;
         if (denom < 0.0f) period += 0.5f * (a - c) / denom;
     }
@@ -252,7 +254,10 @@ void BeatTracker::EstimateTempo() {
     // Confidence from phase consistency: with a real beat, each new measurement agrees with
     // where the oscillator already is; without one (rubato piano, ambient) the "best" beat
     // position wanders randomly and the average error tends towards 0.25 of a beat.
-    m_phaseErrorAvg += (std::fabs(error) - m_phaseErrorAvg) * 0.1f;   // ~2.5 s
+    // Falls faster than it rises: once the beats start agreeing (e.g. drums arrive after an
+    // intro) it locks within a couple of seconds, but a wobbly grid still loses trust at once.
+    const float errorRate = std::fabs(error) < m_phaseErrorAvg ? 0.18f : 0.1f;
+    m_phaseErrorAvg += (std::fabs(error) - m_phaseErrorAvg) * errorRate;
     m_state.phaseError = m_phaseErrorAvg;
     m_rawConfidence = std::clamp((kPhaseErrorBad - m_phaseErrorAvg) / (kPhaseErrorBad - kPhaseErrorGood), 0.0f, 1.0f) *
                       std::clamp(periodicity / kPeriodicityFloor, 0.0f, 1.0f);

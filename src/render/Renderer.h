@@ -57,15 +57,29 @@ public:
     int BoundWidth() const { return m_boundW; }
     int BoundHeight() const { return m_boundH; }
     void DrawFullscreen(ID3D11PixelShader* ps);
-    // Draws layer a (or the a->b transition at `mix`, in `style`) scaled to the back buffer.
+    // Draws layer a (or the a->b transition at `mix`, in `style`) scaled to the back buffer, or
+    // to `region` of it (multi-monitor: one region per monitor).
     // Styles: 0 crossfade, 1 glitch cut, 2 zoom-through, 3 iris, 4 pixel dissolve.
-    void Composite(const CompositeLayer& a, const CompositeLayer* b, float mix, int style = 0, float seed = 0.0f);
+    void Composite(const CompositeLayer& a, const CompositeLayer* b, float mix, int style = 0, float seed = 0.0f,
+                   const RECT* region = nullptr);
+    // Binds the back buffer (or a region of it: the viewport and iResolution match the region).
+    void BindBackBuffer(const RECT* region = nullptr);
+    // Mood colour grade applied by Composite: warmth -1 (cool) .. +1 (warm), hue in radians,
+    // amount 0 (off) .. 1.
+    void SetGrade(float warmth, float hue, float amount) { m_gradeWarmth = warmth; m_gradeHue = hue; m_gradeAmount = amount; }
+    void ClearBackBuffer(float r = 0.0f, float g = 0.0f, float b = 0.0f);
 
     ID2D1DeviceContext* BeginOverlay();   // draws onto the back buffer; nullptr if unavailable
     void EndOverlay();
     PresentResult Present();
 
     ID3D11Device* Device() const { return m_device.Get(); }
+    // The back buffer being drawn this frame (don't hold on to it across a Resize).
+    ComPtr<ID3D11Texture2D> BackBuffer() const {
+        ComPtr<ID3D11Texture2D> t;
+        if (m_swapChain) m_swapChain->GetBuffer(0, IID_PPV_ARGS(&t));
+        return t;
+    }
     ID3D11DeviceContext* Context() const { return m_context.Get(); }
     ID2D1DeviceContext* D2DContext() const { return m_d2dContext.Get(); }
     int Width() const { return m_width; }
@@ -82,6 +96,7 @@ private:
     int m_width = 0, m_height = 0;
     ID3D11RenderTargetView* m_boundRTV = nullptr;   // not owned
     int m_boundW = 0, m_boundH = 0;
+    float m_gradeWarmth = 0.0f, m_gradeHue = 0.0f, m_gradeAmount = 0.0f;
 
     ComPtr<ID3D11Device> m_device;
     ComPtr<ID3D11DeviceContext> m_context;

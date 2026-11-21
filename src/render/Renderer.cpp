@@ -12,6 +12,7 @@ struct CompositeConstants {   // matches shaders/composite_ps.hlsl
     float uvScaleA[2], uvMaxA[2];
     float uvScaleB[2], uvMaxB[2];
     float mix, hasB, style, seed;
+    float warmth, hueShift, gradeAmount, gradePad;
 };
 
 template <typename T>
@@ -217,8 +218,24 @@ void Renderer::DrawFullscreen(ID3D11PixelShader* ps) {
     m_context->Draw(3, 0);
 }
 
-void Renderer::Composite(const CompositeLayer& a, const CompositeLayer* b, float mix, int style, float seed) {
-    BindTarget(m_backBufferRTV.Get(), m_width, m_height, 0.0f, 0.0f);
+void Renderer::BindBackBuffer(const RECT* region) {
+    if (!region) {
+        BindTarget(m_backBufferRTV.Get(), m_width, m_height, 0.0f, 0.0f);
+        return;
+    }
+    const int w = region->right - region->left, h = region->bottom - region->top;
+    BindTarget(m_backBufferRTV.Get(), w, h, 0.0f, 0.0f);
+    D3D11_VIEWPORT vp{ static_cast<float>(region->left), static_cast<float>(region->top), static_cast<float>(w), static_cast<float>(h), 0, 1 };
+    m_context->RSSetViewports(1, &vp);
+}
+
+void Renderer::ClearBackBuffer(float r, float g, float b) {
+    const float colour[4] = { r, g, b, 1 };
+    if (m_backBufferRTV) m_context->ClearRenderTargetView(m_backBufferRTV.Get(), colour);
+}
+
+void Renderer::Composite(const CompositeLayer& a, const CompositeLayer* b, float mix, int style, float seed, const RECT* region) {
+    BindBackBuffer(region);
 
     CompositeConstants cc{};
     memcpy(cc.uvScaleA, a.uvScale, sizeof(cc.uvScaleA));
@@ -231,6 +248,9 @@ void Renderer::Composite(const CompositeLayer& a, const CompositeLayer* b, float
     cc.hasB = b ? 1.0f : 0.0f;
     cc.style = static_cast<float>(style);
     cc.seed = seed;
+    cc.warmth = m_gradeWarmth;
+    cc.hueShift = m_gradeHue;
+    cc.gradeAmount = m_gradeAmount;
     UploadConstants(m_context.Get(), m_compositeCB.Get(), cc);
 
     ID3D11ShaderResourceView* srvs[2] = { a.srv, b ? b->srv : nullptr };

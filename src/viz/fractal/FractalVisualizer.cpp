@@ -123,7 +123,7 @@ void FractalVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_silent = audio.silent;
     m_bass = Smooth(m_bass, audio.silent ? 0.0f : audio.bass, dt, 0.05f, 0.35f);
     m_mids = Smooth(m_mids, 0.5f * (audio.lowMid + audio.highMid), dt, 0.3f, 1.0f);
-    m_treble = Smooth(m_treble, audio.treble, dt, 0.04f, 0.25f);
+    m_treble = Smooth(m_treble, std::max(audio.treble * 0.6f, audio.hat), dt, 0.04f, 0.25f);
     m_buildUp = Smooth(m_buildUp, audio.buildUp, dt, 0.6f, 0.4f);
     m_intensity = Smooth(m_intensity, audio.silent ? 0.0f : audio.intensity, dt, 1.0f, 2.0f);
 
@@ -139,6 +139,15 @@ void FractalVisualizer::Update(const AudioFeatures& audio, float dt) {
         m_kick = std::max(m_kick, 0.3f + 0.5f * audio.bass);
         ++m_beatsSinceChange;
     }
+    if (audio.snareCount != m_lastSnare) {   // snares: a smaller ring
+        m_lastSnare = audio.snareCount;
+        if (!audio.silent) {
+            m_pulses[m_nextPulse][0] = m_z + 2.0f + 2.0f * m_speed;
+            m_pulses[m_nextPulse][1] = 0.35f;
+            m_nextPulse = (m_nextPulse + 1) % 4;
+        }
+    }
+    m_vocal = Smooth(m_vocal, audio.vocal, dt, 0.15f, 0.6f);
     for (auto& p : m_pulses) p[1] *= std::exp(-dt / 1.6f);
     m_kick *= std::exp(-dt / 0.35f);   // a soft swell, not a jolt
 
@@ -202,7 +211,7 @@ void FractalVisualizer::Update(const AudioFeatures& audio, float dt) {
     Copy3(c.albedo, pal.albedo);
     Copy3(c.emitCol, pal.emit);
     Copy3(c.fog, pal.fog);
-    c.emit = (audio.silent ? 0.4f : 0.6f + 1.4f * m_bass + 0.6f * m_buildUp) + 1.5f * m_hyper;
+    c.emit = (audio.silent ? 0.4f : 0.6f + 1.4f * m_bass + 0.6f * m_buildUp + 0.5f * m_vocal) + 1.5f * m_hyper;
     c.sparkle = m_treble;
     c.flash = m_flash;
     for (int i = 0; i < 4; ++i) { c.pulses[i][0] = m_pulses[i][0]; c.pulses[i][1] = m_pulses[i][1]; }

@@ -1,5 +1,6 @@
 #include "audio/AudioAnalyzer.h"
 #include "audio/AudioCapture.h"
+#include "capture/Recorder.h"
 #include "media/NowPlaying.h"
 #include "platform/FrameLimiter.h"
 #include "platform/Settings.h"
@@ -114,6 +115,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     capture->SetPreferredDevice(settings.audioDevice);
     capture->Start();
 
+    // Video recording (MP4 with the music): instant replay and start/stop.
+    Recorder recorder;
+    const bool canRecord = recorder.Init(capture.get());
+    if (canRecord) recorder.SetInstantReplay(settings.instantReplay);
+    std::wstring videoFolder = settings.videoFolder;
+    recorder.SetOutputFolder(videoFolder);
+
     // Now playing: title/artist captions and album-art palettes.
     NowPlaying nowPlaying;
     nowPlaying.Start();
@@ -125,6 +133,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     };
 
     bool showStats = false, showHelp = false;
+    // Stream mode (O): 1 = clean output for OBS (no on-screen text, a 1920x1080 window),
+    // 2 = only the EQ bars on chroma-key green, to overlay on a stream.
+    int streamMode = 0;
+    // Mood colour: warm for bright/energetic music, cool for calm/minor; chords nudge the hue.
+    bool moodColour = settings.moodColour;
+    float gradeWarmth = 0.0f, gradeHue = 0.0f, gradeHueTarget = 0.0f, gradeAmount = moodColour ? 1.0f : 0.0f;
+    uint32_t seenChord = 0;
     bool autoCycle = settings.autoCycle;
     float sinceSwitch = 0.0f;
     auto announce = [&] { overlay.ShowMessage(host.Active().Name()); sinceSwitch = 0.0f; };
@@ -146,6 +161,79 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         }
     };
 
+    // --- Multi-monitor ------------------------------------------------------------------
+    // Fullscreen covers one monitor (mode 0, G picks which), or all of them: each showing its own
+    // visualiser (mode 1) or one visualiser stretched across (mode 2). W cycles the modes.
+    int displayMode = settings.displayMode;
+    std::wstring fullscreenMonitor = settings.monitor;
+    auto applyDisplay = [&] {
+        const std::vector<MonitorDesc> monitors = Window::Monitors();
+        if (monitors.size() < 2 || displayMode == 0) {
+            const MonitorDesc* chosen = nullptr;
+            for (const MonitorDesc& m : monitors) if (m.name == fullscreenMonitor) chosen = &m;
+            window.SetFullscreenArea(chosen ? &chosen->rect : nullptr);
+            host.SetRegions({});
+            return;
+        }
+        RECT all = monitors[0].rect;
+        for (const MonitorDesc& m : monitors) UnionRect(&all, &all, &m.rect);
+        window.SetFullscreenArea(&all);
+        std::vector<RECT> regions;
+        if (displayMode == 1 && window.IsFullscreen()) {
+            for (const MonitorDesc& m : monitors) {
+                RECT r = m.rect;
+                OffsetRect(&r, -all.left, -all.top);
+                regions.push_back(r);
+            }
+        }
+        host.SetRegions(regions);
+    };
+    window.onFullscreenChanged = [&](bool fullscreen) {
+        if (!fullscreen) host.SetRegions({});
+        else if (displayMode == 1) {   // regions follow the (new) window: re-derive them
+            const std::vector<MonitorDesc> monitors = Window::Monitors();
+            if (monitors.size() >= 2) {
+                RECT all = monitors[0].rect;
+                for (const MonitorDesc& m : monitors) UnionRect(&all, &all, &m.rect);
+                std::vector<RECT> regions;
+                for (const MonitorDesc& m : monitors) {
+                    RECT r = m.rect;
+                    OffsetRect(&r, -all.left, -all.top);
+                    regions.push_back(r);
+                }
+                host.SetRegions(regions);
+            }
+        }
+    };
+    auto cycleDisplayMode = [&] {
+        if (Window::Monitors().size() < 2) { overlay.ShowMessage(L"Only one monitor is connected", 2.0f); return; }
+        displayMode = (displayMode + 1) % 3;
+        applyDisplay();
+        if (!window.IsFullscreen()) window.SetFullscreen(true);
+        static const wchar_t* kNames[] = { L"One monitor", L"Every monitor: a different visualiser on each", L"Spanning every monitor" };
+        overlay.ShowMessage(kNames[displayMode], 2.5f);
+    };
+    auto nextMonitor = [&] {
+        const std::vector<MonitorDesc> monitors = Window::Monitors();
+        if (monitors.size() < 2) { overlay.ShowMessage(L"Only one monitor is connected", 2.0f); return; }
+        int index = 0;
+        for (int i = 0; i < static_cast<int>(monitors.size()); ++i) if (monitors[i].name == fullscreenMonitor) index = i;
+        if (fullscreenMonitor.empty()) {   // start from the one the window is on
+            const HMONITOR here = MonitorFromWindow(window.Handle(), MONITOR_DEFAULTTONEAREST);
+            MONITORINFOEXW mi{};
+            mi.cbSize = sizeof(mi);
+            GetMonitorInfoW(here, &mi);
+            for (int i = 0; i < static_cast<int>(monitors.size()); ++i) if (monitors[i].name == mi.szDevice) index = i;
+        }
+        index = (index + 1) % static_cast<int>(monitors.size());
+        fullscreenMonitor = monitors[index].name;
+        displayMode = 0;
+        applyDisplay();
+        if (!window.IsFullscreen()) window.SetFullscreen(true);
+        overlay.ShowMessage(L"Monitor " + std::to_wstring(index + 1) + L" of " + std::to_wstring(monitors.size()), 2.0f);
+    };
+    applyDisplay();
+
     auto saveSettings = [&] {
         window.GetPlacement(settings.windowRect, settings.maximized);
         settings.hasPlacement = true;
@@ -156,6 +244,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         settings.albumColours = albumColours;
         settings.trackTitles = trackTitles;
         settings.autoCycle = autoCycle;
+        settings.instantReplay = recorder.InstantReplay();
+        settings.videoFolder = videoFolder;
+        settings.moodColour = moodColour;
+        settings.displayMode = displayMode;
+        settings.monitor = fullscreenMonitor;
         settings.Save();
     };
     window.onClose = saveSettings;   // while the window still exists
@@ -188,6 +281,51 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             sinceSwitch = 0.0f;
             overlay.ShowMessage(autoCycle ? L"Auto-cycle on: a new visualiser with each song" : L"Auto-cycle off", 2.5f);
             break;
+        case 'W':        cycleDisplayMode(); break;
+        case 'O': {
+            streamMode = (streamMode + 1) % 3;
+            if (streamMode == 1) window.SetClientSize(1920, 1080);
+            if (streamMode == 0) window.RestoreSize();
+            if (streamMode == 2 && !eqBars.Visible()) eqBars.SetVisible(true);
+            static const wchar_t* kModes[] = { L"Stream mode off", L"Stream mode: clean (no on-screen text, 1920 x 1080 window)",
+                                               L"Stream mode: EQ bars on green (chroma key)" };
+            // In stream mode on-screen text is hidden, so say it in the title bar instead.
+            window.SetTitle(streamMode ? kModes[streamMode] : kAppName);
+            if (streamMode == 0) overlay.ShowMessage(kModes[0], 1.5f);
+            break;
+        }
+        case 'K':
+            moodColour = !moodColour;
+            overlay.ShowMessage(moodColour ? L"Mood colour on: the picture warms and cools with the music" : L"Mood colour off", 2.5f);
+            break;
+        case 'G':        nextMonitor(); break;
+        case 'R':
+            if (!canRecord) { overlay.ShowMessage(L"Recording isn't available on this PC", 2.5f); break; }
+            recorder.ToggleRecording();
+            overlay.ShowMessage(recorder.Recording() ? L"Recording" : L"Saving the recording…", 1.5f);
+            break;
+        case 'I':
+            if (!canRecord) { overlay.ShowMessage(L"Recording isn't available on this PC", 2.5f); break; }
+            recorder.SetInstantReplay(!recorder.InstantReplay());
+            overlay.ShowMessage(recorder.InstantReplay() ? L"Instant replay on: press S to save the last 30 s" : L"Instant replay off", 2.5f);
+            break;
+        case 'S':
+            if (canRecord) recorder.SaveReplay();
+            break;
+        case 'V': {   // choose where videos are saved
+            if (!canRecord) { overlay.ShowMessage(L"Recording isn't available on this PC", 2.5f); break; }
+            const bool wasFullscreen = window.IsFullscreen();
+            if (wasFullscreen) window.SetFullscreen(false);   // so the dialog isn't hidden behind
+            const std::wstring chosen = Window::PickFolder(window.Handle(), L"Save videos to", recorder.OutputFolder());
+            if (wasFullscreen) window.SetFullscreen(true);
+            if (!chosen.empty()) {
+                videoFolder = chosen;
+                recorder.SetOutputFolder(videoFolder);
+                saveSettings();
+            }
+            overlay.ShowMessage(L"Videos are saved to " + Recorder::ShortPath(recorder.OutputFolder()), 4.0f);
+            break;
+        }
         case 'T':
             trackTitles = !trackTitles;
             if (trackTitles && !track.title.empty()) overlay.ShowTrack(track.title, track.artist);
@@ -277,6 +415,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             // playing when the app starts).
             if (newTrack && autoCycle && track.trackSerial > 1) {
                 host.SelectRandom();
+                host.ShuffleExtras();
                 sinceSwitch = 0.0f;
             }
         }
@@ -291,15 +430,40 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         std::wstring message = host.Active().TakeMessage();
         if (!message.empty()) overlay.ShowMessage(message);
 
+        // Chords move the hue around the circle of fifths: related chords stay close, distant ones
+        // swing further (at most about 12 degrees). The mood sets the warmth.
+        if (audio.chordCount != seenChord) {
+            seenChord = audio.chordCount;
+            const int fifths = (audio.chordRoot * 7) % 12;
+            gradeHueTarget = 0.21f * std::sin(6.2831853f * fifths / 12.0f) - (audio.chordMinor ? 0.05f : 0.0f);
+        }
+        gradeHue += (gradeHueTarget - gradeHue) * (1.0f - std::exp(-dt / 1.2f));
+        gradeWarmth += (audio.mood - gradeWarmth) * (1.0f - std::exp(-dt / 3.0f));
+        gradeAmount += ((moodColour ? 1.0f : 0.0f) - gradeAmount) * (1.0f - std::exp(-dt / 0.5f));
+        renderer.SetGrade(gradeWarmth, gradeHue, gradeAmount);
         renderer.UploadAudio(audio);
-        host.Render(renderer, static_cast<float>(time), dt);   // leaves the back buffer bound
+        if (streamMode == 2) renderer.ClearBackBuffer(0.0f, 1.0f, 0.0f);   // bars on green: no visualiser
+        else host.Render(renderer, static_cast<float>(time), dt);   // leaves the back buffer bound
 
         float accentLo[3], accentHi[3];
         host.Active().AccentColours(accentLo, accentHi);
         eqBars.Update(audio, accentLo, accentHi, dt);
+        const RECT primary = host.PrimaryRegion();
+        renderer.BindBackBuffer(host.HasRegions() ? &primary : nullptr);
         eqBars.Render(renderer);
+        recorder.CaptureFrame(renderer);   // what's recorded: the visuals and bars, not the text overlays
+        if (std::wstring note = recorder.TakeMessage(); !note.empty()) overlay.ShowMessage(note, 4.0f);
+        if (recorder.Recording()) {
+            const int secs = static_cast<int>(recorder.RecordingSeconds());
+            wchar_t rec[32];
+            swprintf_s(rec, L"REC  %d:%02d", secs / 60, secs % 60);
+            overlay.SetIndicator(rec, true);
+        } else {
+            overlay.SetIndicator(L"", false);
+        }
 
         overlay.Update(dt);
+        if (streamMode != 0) { overlay.SetIndicator(L"", false); overlay.ClearTransient(); }   // nothing on screen but what you ask for
         if (overlay.HasContent(showStats, showHelp)) {
             if (ID2D1DeviceContext* d2d = renderer.BeginOverlay()) {
                 OverlayStats stats;
@@ -317,8 +481,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
                     stats.visualizer = host.Active().Name();
                     stats.visualizerStatus = host.Active().Status();
                 }
-                overlay.Draw(d2d, renderer.Width(), renderer.Height(), stats, audio, showStats, showHelp,
-                             eqBars.Visible() ? 230.0f : 0.0f);
+                overlay.Draw(d2d, primary.right - primary.left, primary.bottom - primary.top, stats, audio, showStats, showHelp,
+                             eqBars.Visible() ? 230.0f : 0.0f, static_cast<float>(primary.left), static_cast<float>(primary.top));
                 renderer.EndOverlay();
             }
         }
@@ -331,6 +495,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             break;
         case PresentResult::DeviceLost:
             host.ReleaseResources();
+            recorder.ReleaseDeviceResources();
             overlay.ReleaseDeviceResources();
             eqBars.ReleaseResources();
             if (!renderer.Reinit() || !createDeviceResources()) {

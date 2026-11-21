@@ -19,9 +19,19 @@ It listens to whatever your PC is playing (Spotify, a browser, games…) and ren
 
 It also understands the music beyond loudness:
 * **Beat grid:** it locks onto the song's tempo and *predicts* beats, so pulses land on the beat instead of just after it.
+  Every scene also moves faster for faster songs.
 * **Song structure:** it detects build-ups and drops.
+* **Instruments:** kick, snare, hi-hats, voice and sustained pads are picked out and drive their own details.
+* **Key and mood:** it finds the key and the chords; the picture warms for bright, energetic music, cools for calm or
+  minor-key music, and chord changes nudge the hue.
 * **Now playing:** it shows the track title and takes colours from the album art (Spotify, browsers, any app that
   shows up in Windows' media flyout).
+
+And it fits around you:
+* **Record what you see, with the music**, to MP4: press `R` to record, or turn on instant replay (`I`) and press `S`
+  to save the last 30 seconds.
+* **Multiple monitors:** fullscreen on any monitor, a different visualiser on every monitor, or one spread across them all.
+* **Stream mode** for OBS: clean output with no on-screen text, or just the EQ bars on chroma-key green.
 
 ## Keys
 
@@ -36,15 +46,51 @@ It also understands the music beyond loudness:
 | `Q` | Galaxy: fire the quasar. Fractal flights: hyperspeed. Nebula: supernova (all as on a drop) |
 | `P` | Nebula: summon a pulsar |
 | `B` | Cyberpunk equaliser bars along the bottom (neon LED segments, glitch tears on hard hits) |
+| `R` | Record to MP4 (press again to stop and save) |
+| `I` / `S` | Instant replay on / off (keeps the last 30 s ready) / save the last 30 s |
+| `V` | Choose the folder videos are saved to |
+| `W` | Multiple monitors: one monitor → a different visualiser on each → one spanning all |
+| `G` | Fullscreen on the next monitor |
+| `K` | Mood colour on / off |
+| `O` | Stream mode: clean (no on-screen text, 1920×1080 window) → EQ bars on green → off |
 | `A` | Album-art colours on / off |
 | `T` | Track titles on / off |
 | `D` | Cycle audio device: system default → each output → … |
-| `F1` | Stats: fps, resolution, GPU time, audio device, level meters |
+| `F1` | Stats: fps, resolution, GPU time, audio device, tempo, level and instrument meters |
 | `H` | Help |
 | `Esc` | Leave fullscreen, or quit |
 
-Window position, fullscreen, the last visualiser, the audio device and the B/A/T/C toggles are remembered in
-`%APPDATA%\Visualizer\settings.ini` (delete it to reset).
+Window position, fullscreen, the monitor setup, the last visualiser, the audio device and the B/A/T/C/I/K toggles
+are remembered in `%APPDATA%\Visualizer\settings.ini` (delete it to reset).
+
+## Recording
+
+Videos are MP4 (H.264 video, AAC stereo audio). They go to `Videos\Visualizer` (for example
+`C:\Users\you\Videos\Visualizer`) unless you choose another folder with `V`; the message after saving shows the full
+path. The audio is exactly what the visualiser
+hears, so it's in sync with the picture. On-screen text (messages, stats, help, the REC indicator) isn't recorded; the
+visuals and the EQ bars are.
+
+* `R` starts a recording; press it again to stop and save it.
+* `I` turns on **instant replay**: the last 30 seconds are always kept (in `%TEMP%\Visualizer`), and `S` saves them.
+  It's off until you turn it on, and remembered.
+* Recordings are up to 2560×1440 at 60 fps (bigger windows are scaled down). The frames are converted to the encoder's
+  format on the GPU and encoded by the GPU's video encoder where there is one, so it costs about 20% of one CPU core
+  while recording or buffering.
+
+## Multiple monitors
+
+With more than one monitor, `W` cycles what fullscreen covers: **one monitor**, **every monitor with a different
+visualiser** (the arrows change the primary monitor's; choosing one that's already on another monitor swaps them;
+with auto-cycle on, every monitor gets a new one each song), or **one visualiser spanning all of them**. `G` moves
+single-monitor fullscreen to the next monitor. The EQ bars and on-screen text stay on the primary monitor.
+
+## Stream mode
+
+`O` cycles stream mode, for capturing in OBS (window capture works best):
+* **Clean:** no on-screen text at all, and the window becomes exactly 1920×1080 (when not fullscreen).
+* **EQ bars on green:** only the equaliser bars, over pure green for a chroma-key filter: overlay them on your stream.
+* **Off.** The title bar shows which mode is on.
 
 **No visuals reacting?** Press `F1`. If it says *(silent)* while music plays, your player is outputting to a
 different device than the one being captured. This is common with virtual mixers such as SteelSeries Sonar or Voicemeeter.
@@ -78,6 +124,16 @@ Press `D` until the device your music plays on is selected.
   120 BPM, about ×0.75 at 85 and ×1.3 at 170 (clamped to 0.7–1.4). When the grid locks at half-time (drum & bass
   counted at 87), the rate of heard hits reveals the real tempo. `F1` shows the factor next to the BPM.
 * **Drums present** (`percussive`): drum hits make many frequency bands jump at once, while tonal notes light up a few.
+* **Instruments** (lightweight DSP, no machine learning): the kick is the low onset beat; a **snare/clap** is the
+  150–350 Hz body and the 1.5–5 kHz snap jumping together; a **hi-hat** is a jump in 7–16 kHz on its own. Each band
+  has its own adaptive threshold and must be audible in the mix. **Voice vs pad**: how tonal the 300–3400 Hz range
+  is and whether its loudness pulses at syllable rate (3–8 Hz). Drums are reliable; voice vs synth is rough
+  (distorted vocals barely register). Hi-hats drive the sparkle in every scene; snares send smaller ripples and rings;
+  vocals brighten the light; pads add drift.
+* **Key, chords and mood:** a pitch-class profile (chroma, from spectral peaks) is matched against the
+  Krumhansl-Kessler key profiles over ~10 s, and against major and minor triads over ~0.4 s for chord changes.
+  A major key can be read as its relative minor (same notes), so the mood leans on it only as far as it's sure.
+  The mood mixes major/minor, tempo, how big the section is and how bright it sounds. `K` turns the colour grade off.
 * **Build-ups:** the high band rising steadily over several seconds, especially with the bass cut.
 * **Drops:** the bass returning after at least 1.5 s away, or a big level jump after a build. These are measured
   in raw dB before auto-gain, so they don't depend on volume. Build-ups and drops are only judged after a 4 s warm-up
@@ -87,9 +143,11 @@ Press `D` until the device your music plays on is selected.
 
 The analyzer was checked against real recordings (thrash, boom-bap, techno, electronic, electro/dubstep and solo piano)
 with the tools in [`tools/analysis`](tools/analysis/README.md). They replay a recording through the real analyzer and
-score it against an offline reference beat tracker. Tempo matched the reference within 0.5 BPM on every song with a beat.
-Beat placement is excellent on steady grooves (F ≈ 0.9 on hip-hop and electronic) and weaker on thrash metal and
-syncopated techno, where confidence stays honestly low so visuals don't lock onto a shaky grid.
+score it against an offline reference beat tracker. Tempo matched the reference within 0.5 BPM on every song with a beat
+(except a 1% drift on one electro track). Beat placement is excellent on steady grooves (F ≈ 0.9 on hip-hop and
+electronic) and weaker on thrash metal and syncopated techno, where confidence stays honestly low so visuals don't
+lock onto a shaky grid. Trust builds faster than it falls, so the grid locks sooner after a beatless intro (mean grid
+F 0.43 → 0.47; the electro track locks 6 s sooner).
 
 ## Performance
 
@@ -106,7 +164,8 @@ Measured on an RTX 3080 at 2560×1440 fullscreen:
   the vertex shader, so there are no particle buffers or simulation; the smooth galaxy light is drawn analytically.
 * Fractal flights: about 0.3–1.3 ms GPU per frame depending on the world (50% resolution).
 * Spectrum: 0.01 ms GPU per frame.
-* CPU: under 1% of one core in a window, about 3.5% fullscreen with the stats overlay.
+* CPU: under 1% of one core in a window, about 3.5% fullscreen with the stats overlay; about 20% more while
+  recording or buffering instant replay.
 
 How it stays light:
 
@@ -128,7 +187,7 @@ Requires Visual Studio 2022+ with **Desktop development with C++**, which includ
 ```
 
 The exe statically links the C runtime and embeds all shaders. Its only dependencies are DLLs that ship with Windows
-(Direct3D 11, Direct2D, DirectWrite, WASAPI), and it needs a DirectX 11 GPU (anything since ~2010).
+(Direct3D 11, Direct2D, DirectWrite, WASAPI, Media Foundation), and it needs a DirectX 11 GPU (anything since ~2010).
 
 Dev tools:
 * `build\Release\vis_record.exe` records what's playing, one WAV per song (git-ignored), and `vis_replay.exe` plus
@@ -137,6 +196,7 @@ Dev tools:
 * `VISUALIZER_GPU_BUDGET_MS=0.1` (environment variable) forces adaptive resolution to kick in.
 * `VISUALIZER_TAA=0` turns off the Nebula's temporal accumulation, and `VISUALIZER_SEED=<n>` makes its look and
   flight path repeatable. Together they allow before/after comparisons.
+* `VISUALIZER_FAKE_MONITORS=2` splits one screen into side-by-side pretend monitors, to try the multi-monitor modes.
 * `tools\make_icon.ps1` regenerates `res\app.ico`.
 
 ## Architecture
@@ -146,14 +206,16 @@ src/
   main.cpp                  window + loop + keys; RegisterVisualizers() is the list of visualisers
   platform/                 Window (borderless fullscreen), FrameLimiter, Settings
   audio/AudioCapture        WASAPI loopback thread → lock-free ring buffer; device selection
-  audio/AudioAnalyzer       FFT → 64 log bands, auto-gain, smoothing, onset beats, build-ups/drops, waveform → AudioFeatures
+  audio/AudioAnalyzer       FFT → 64 log bands, auto-gain, smoothing, onset beats, instruments, key/chords/mood,
+                            build-ups/drops, waveform → AudioFeatures
   audio/BeatTracker         tempo + beat phase: onset envelope, autocorrelation, comb filter, phase-locked oscillator
   media/NowPlaying          Windows media sessions (C++/WinRT): title, artist, album art
   media/TrackPalette        album art → deep / mid / hot palette
   render/Renderer           D3D11 device, flip-model swap chain, composite pass, Direct2D overlay target
   render/GpuTimer           non-blocking GPU timestamp queries
+  capture/Recorder          MP4 recording + instant replay: GPU NV12 conversion, Media Foundation encoder thread, segment joining
   viz/Visualizer.h          the plug-in interface (IVisualizer)
-  viz/VisualizerHost        offscreen targets, crossfades, adaptive resolution
+  viz/VisualizerHost        offscreen targets, crossfades, adaptive resolution, one region per monitor
   viz/nebula/, viz/neongrid/, viz/feedback/, viz/scope/, viz/aurora/, viz/galaxy/, viz/fractal/, viz/spectrum/
   ui/Overlay                messages, now-playing caption, F1 stats, H help (DirectWrite)
   ui/EqBars                 optional equaliser bars drawn over any visualiser

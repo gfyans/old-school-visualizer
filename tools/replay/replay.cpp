@@ -88,6 +88,9 @@ int wmain(int argc, wchar_t** argv) {
     uint32_t lastBeat = 0, lastGrid = 0, lastDrop = 0;
     std::vector<float> dropTimes, bpms, confs;
     size_t onsetBeats = 0, gridBeats = 0;
+    float vocalSum = 0.0f, padSum = 0.0f, factorLast = 1.0f, moodSum = 0.0f;
+    int moodCount = 0;
+    int audible = 0;
     float peakBuild = 0.0f, peakBuildAt = 0.0f;
 
     for (size_t start = 0; start + hop <= audio.size(); start += hop) {
@@ -106,6 +109,9 @@ int wmain(int argc, wchar_t** argv) {
         if (drop) dropTimes.push_back(t);
         if (f.buildUp > peakBuild) { peakBuild = f.buildUp; peakBuildAt = t; }
         if (t > 10.0f && f.bpm > 0.0f) { bpms.push_back(f.bpm); confs.push_back(f.tempoConfidence); }
+        if (!f.silent) { vocalSum += f.vocal; padSum += f.pad; ++audible; }
+        factorLast = f.tempoFactor;
+        if (!f.silent && t > 10.0f) { moodSum += f.mood; ++moodCount; }
 
         const BeatTracker::State& diag = analyzer->TrackerState();
         std::fprintf(csv, "%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%.2f,%.3f,%.3f,%d,%.3f,%d,%.3f,%.3f,%.3f,%.3f\n",
@@ -124,5 +130,13 @@ int wmain(int argc, wchar_t** argv) {
         onsetBeats, gridBeats, peakBuild, peakBuildAt);
     for (float d : dropTimes) std::printf(" %.1fs", d);
     std::printf("%s\n", dropTimes.empty() ? " none" : "");
+    const AudioFeatures& last = analyzer->Features();
+    std::printf("  instruments: snares %.0f/min, hats %.0f/min, kicks %.0f/min | vocal %.2f, pad %.2f (average) | speed x%.2f\n",
+        last.snareCount * 60.0f / duration, last.hatCount * 60.0f / duration, last.beatCount * 60.0f / duration,
+        audible ? vocalSum / audible : 0.0f, audible ? padSum / audible : 0.0f, factorLast);
+    static const char* kNames[12] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+    std::printf("  harmony: key %s %s (confidence %.2f), chord changes %.0f/min | mood %+.2f (average after 10 s)\n",
+        kNames[last.key], last.minorKey ? "minor" : "major", last.keyConfidence, last.chordCount * 60.0f / duration,
+        moodCount ? moodSum / moodCount : 0.0f);
     return 0;
 }

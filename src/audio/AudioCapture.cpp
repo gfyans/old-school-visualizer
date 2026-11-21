@@ -116,6 +116,18 @@ void AudioCapture::GetLatestStereo(float* mono, float* side, size_t count) const
     }
 }
 
+size_t AudioCapture::ReadSince(uint64_t& from, float* mono, float* side, size_t maxCount) const {
+    const uint64_t end = m_written.load(std::memory_order_acquire);
+    if (end - from > kRingSize / 2) from = end - kRingSize / 2;   // fell behind: skip ahead
+    const size_t count = static_cast<size_t>(std::min<uint64_t>(end - from, maxCount));
+    for (size_t i = 0; i < count; ++i) {
+        mono[i] = m_ring[(from + i) & (kRingSize - 1)];
+        side[i] = m_side[(from + i) & (kRingSize - 1)];
+    }
+    from += count;
+    return count;
+}
+
 void AudioCapture::Write(const float* samples, const float* side, size_t count) {
     uint64_t w = m_written.load(std::memory_order_relaxed);
     for (size_t i = 0; i < count; ++i) {

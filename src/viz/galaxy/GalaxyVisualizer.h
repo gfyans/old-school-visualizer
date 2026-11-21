@@ -76,6 +76,8 @@ private:
     Shot m_cam{ 1.55f, 0.5f, 0.07f, 1.6f, 0.0f, 0.0f };        // current (smoothed towards the shot)
     float m_kick = 0.0f;
     bool m_fireQuasar = false;
+    uint32_t m_lastSnare = 0;
+    float m_vocal = 0.0f;
 
     float m_time = 0.0f, m_anim = 0.0f, m_pattern = 0.0f, m_accSpin = 0.0f, m_yaw = 0.0f;
     float m_gravity = 0.0f, m_treble = 0.0f, m_buildUp = 0.0f, m_beatGlow = 0.0f, m_intensity = 0.0f;

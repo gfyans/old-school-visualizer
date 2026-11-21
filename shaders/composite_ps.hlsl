@@ -17,7 +17,23 @@ cbuffer Composite : register(b2) {
     float hasB;
     float style;
     float seed;        // changes per transition, for randomised effects
+    float warmth;      // mood colour: -1 cool .. +1 warm
+    float hueShift;    // radians: nudged by chord changes
+    float gradeAmount; // 0 = off
+    float gradePad;
 };
+
+// Mood colour grade: a gentle warm/cool white balance and a small hue rotation (in YIQ space,
+// which keeps brightness while turning the colours).
+float3 Grade(float3 c) {
+    if (gradeAmount <= 0.0) return c;
+    float3 yiq = float3(dot(c, float3(0.299, 0.587, 0.114)), dot(c, float3(0.596, -0.274, -0.322)), dot(c, float3(0.211, -0.523, 0.312)));
+    float a = hueShift * gradeAmount, ca = cos(a), sa = sin(a);
+    yiq.yz = float2(yiq.y * ca - yiq.z * sa, yiq.y * sa + yiq.z * ca);
+    float3 rgb = float3(dot(yiq, float3(1.0, 0.956, 0.621)), dot(yiq, float3(1.0, -0.272, -0.647)), dot(yiq, float3(1.0, -1.106, 1.703)));
+    rgb *= 1.0 + warmth * gradeAmount * float3(0.08, 0.0, -0.09);
+    return max(rgb, 0.0);
+}
 
 float3 SampleA(float2 uv) { return LayerA.SampleLevel(Linear, min(saturate(uv) * uvScaleA, uvMaxA), 0).rgb; }
 float3 SampleB(float2 uv) { return LayerB.SampleLevel(Linear, min(saturate(uv) * uvScaleB, uvMaxB), 0).rgb; }
@@ -72,6 +88,7 @@ float3 Transition(float2 uv, float2 pixel) {
 
 float4 main(VSOut i) : SV_Target {
     float3 c = hasB > 0.5 ? Transition(i.uv, i.pos.xy) : SampleA(i.uv);
+    c = Grade(c);
     c += (InterleavedGradientNoise(i.pos.xy) - 0.5) / 255.0;
     return float4(c, 1);
 }

@@ -49,10 +49,16 @@ void Settings::Load() {
     fullscreen = ReadInt(file, L"Fullscreen", 0) != 0;
     visualizer = ReadString(file, L"Visualizer");
     audioDevice = ReadString(file, L"AudioDevice");
+    monitor = ReadString(file, L"Monitor");
+    videoFolder = ReadString(file, L"VideoFolder");
+    displayMode = ReadInt(file, L"DisplayMode", 0);
+    if (displayMode < 0 || displayMode > 2) displayMode = 0;
     showBars = ReadInt(file, L"ShowBars", 0) != 0;
     albumColours = ReadInt(file, L"AlbumColours", 1) != 0;
     trackTitles = ReadInt(file, L"TrackTitles", 1) != 0;
     autoCycle = ReadInt(file, L"AutoCycle", 0) != 0;
+    instantReplay = ReadInt(file, L"InstantReplay", 0) != 0;
+    moodColour = ReadInt(file, L"MoodColour", 1) != 0;
 }
 
 void Settings::Save() const {
@@ -68,8 +74,13 @@ void Settings::Save() const {
     WriteInt(file, L"Fullscreen", fullscreen ? 1 : 0);
     WriteString(file, L"Visualizer", visualizer);
     WriteString(file, L"AudioDevice", audioDevice);
+    WriteString(file, L"Monitor", monitor);
+    WriteString(file, L"VideoFolder", videoFolder);
+    WriteInt(file, L"DisplayMode", displayMode);
     WriteInt(file, L"ShowBars", showBars ? 1 : 0);
     WriteInt(file, L"AlbumColours", albumColours ? 1 : 0);
     WriteInt(file, L"TrackTitles", trackTitles ? 1 : 0);
     WriteInt(file, L"AutoCycle", autoCycle ? 1 : 0);
+    WriteInt(file, L"InstantReplay", instantReplay ? 1 : 0);
+    WriteInt(file, L"MoodColour", moodColour ? 1 : 0);
 }

@@ -58,6 +58,8 @@ private:
     bool m_silent = true, m_fireDrop = false;
     uint32_t m_lastBeat = 0, m_lastGrid = 0, m_lastDrop = 0;
     int m_beatsSinceChange = 0, m_bars = 0;
+    uint32_t m_lastSnare = 0;
+    float m_vocal = 0.0f;
     float m_turn = 0.0f, m_turnTarget = 0.0f;   // eased 45-degree world turns on phrases
     float m_timeSinceChange = 0.0f, m_lastBarPhase = 0.0f;
     bool m_changePending = false;

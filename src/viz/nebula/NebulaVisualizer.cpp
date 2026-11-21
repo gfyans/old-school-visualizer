@@ -352,7 +352,7 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
     // --- Smoothed audio drivers ----------------------------------------------
     m_bass = Smooth(m_bass, audio.bass, dt, 0.03f, 0.25f);
     m_mids = Smooth(m_mids, 0.5f * (audio.lowMid + audio.highMid), dt, 0.1f, 0.6f);
-    m_treble = Smooth(m_treble, audio.treble, dt, 0.02f, 0.2f);
+    m_treble = Smooth(m_treble, std::max(audio.treble * 0.6f, audio.hat), dt, 0.02f, 0.2f);
     m_buildUp = Smooth(m_buildUp, audio.buildUp, dt, 0.5f, 0.3f);
 
     // Build-ups accelerate the flight; drops hit hard then settle.
@@ -371,10 +371,10 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
 
     // With a locked grid, the core's heartbeat follows the predicted beat (no lag).
     const float pulse = gridLocked ? std::max(m_gridPulse, 0.5f * m_beatPulse) : m_beatPulse;
-    const float targetLight = audio.silent ? 0.6f : 0.6f + 0.7f * m_bass + 0.9f * pulse + 0.6f * m_buildUp;
+    const float targetLight = audio.silent ? 0.6f : 0.6f + 0.7f * m_bass + 0.9f * pulse + 0.6f * m_buildUp + 0.4f * audio.vocal;
     m_lightStrength = Smooth(m_lightStrength, targetLight, dt, 0.03f, 0.35f);
 
-    m_swirl += dt * tf * (0.003f + 0.02f * m_mids + 0.03f * m_buildUp);   // tension: the gas churns faster
+    m_swirl += dt * tf * (0.003f + 0.02f * m_mids + 0.03f * m_buildUp + 0.015f * audio.pad);   // pads: drift   // tension: the gas churns faster
     m_rollDrift += dt * tf * (0.04f * m_mids + 0.05f * m_buildUp);
 
     // --- Camera: directed flight. Every 8 bars (or ~16 s) the flight swoops to a new heading,

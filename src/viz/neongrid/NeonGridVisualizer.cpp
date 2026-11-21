@@ -186,7 +186,7 @@ void NeonGridVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_blend = std::min(1.0f, m_blend + dt / m_blendSeconds);
 
     m_bass = Smooth(m_bass, audio.bass, dt, 0.05f, 0.3f);
-    m_treble = Smooth(m_treble, audio.treble, dt, 0.02f, 0.2f);
+    m_treble = Smooth(m_treble, std::max(audio.treble * 0.6f, audio.hat), dt, 0.02f, 0.2f);
     m_buildUp = Smooth(m_buildUp, audio.buildUp, dt, 0.5f, 0.3f);
     m_drums = Smooth(m_drums, std::clamp((audio.percussive - 0.3f) / 0.12f, 0.0f, 1.0f), dt, 0.5f, 2.0f);
 

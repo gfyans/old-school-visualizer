@@ -219,7 +219,7 @@ void GalaxyVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_time += dt;
     m_silent = audio.silent;
     m_gravity = Smooth(m_gravity, audio.silent ? 0.0f : audio.bass, dt, 0.06f, 0.5f);
-    m_treble = Smooth(m_treble, audio.treble, dt, 0.05f, 0.3f);
+    m_treble = Smooth(m_treble, std::max(audio.treble * 0.6f, audio.hat), dt, 0.05f, 0.3f);
     m_buildUp = Smooth(m_buildUp, audio.buildUp, dt, 0.6f, 0.4f);
     m_intensity = Smooth(m_intensity, audio.silent ? 0.0f : audio.intensity, dt, 1.0f, 2.0f);
 
@@ -229,6 +229,15 @@ void GalaxyVisualizer::Update(const AudioFeatures& audio, float dt) {
     if (audio.beatCount != m_lastBeat) { m_lastBeat = audio.beatCount; beat |= !gridLocked; }
     if (audio.gridBeat != m_lastGrid) { m_lastGrid = audio.gridBeat; beat |= gridLocked; }
     m_quasarCooldown -= dt;
+    if (audio.snareCount != m_lastSnare) {   // snares: a smaller ripple through the arms
+        m_lastSnare = audio.snareCount;
+        if (!audio.silent) {
+            m_waves[m_nextWave][0] = 0.03f;
+            m_waves[m_nextWave][1] = 0.3f;
+            m_nextWave = (m_nextWave + 1) % 4;
+        }
+    }
+    m_vocal = Smooth(m_vocal, audio.vocal, dt, 0.15f, 0.6f);
     if (beat && !audio.silent) {
         m_waves[m_nextWave][0] = 0.03f;
         m_waves[m_nextWave][1] = 0.6f + 0.9f * audio.bass;
@@ -390,7 +399,7 @@ void GalaxyVisualizer::Render(Renderer& renderer, float time, float dt) {
     c.flash = m_flash;
     c.dustAmount = c.starBright * 2.0f;
     Copy3(c.sky, p.sky);
-    c.glow = (m_silent ? 0.7f : 1.0f) * (1.0f + 0.5f * m_beatGlow + 0.8f * m_flash + 0.3f * m_quasar);
+    c.glow = (m_silent ? 0.7f : 1.0f) * (1.0f + 0.5f * m_beatGlow + 0.8f * m_flash + 0.3f * m_quasar + 0.25f * m_vocal);
     c.kick = m_kick;
     D3D11_MAPPED_SUBRESOURCE mapped;
     if (SUCCEEDED(ctx->Map(m_cb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {

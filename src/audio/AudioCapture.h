@@ -35,6 +35,10 @@ public:
     // The latest `count` mono and stereo "side" ((L - R) / 2) samples, from one consistent
     // snapshot: left = mono + side, right = mono - side.
     void GetLatestStereo(float* mono, float* side, size_t count) const;
+    // Every sample written since the absolute index `from` (up to maxCount), oldest first, for
+    // consumers that need the whole stream (recording). Advances `from`; skips ahead if the
+    // reader fell more than half the ring behind. Returns the number of samples copied.
+    size_t ReadSince(uint64_t& from, float* mono, float* side, size_t maxCount) const;
     uint32_t SampleRate() const { return m_sampleRate.load(std::memory_order_relaxed); }
     uint64_t TotalSamples() const { return m_written.load(std::memory_order_acquire); }
     std::wstring DeviceName() const;   // friendly name of the device being captured

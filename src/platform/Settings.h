@@ -15,6 +15,11 @@ struct Settings {
     bool albumColours = true;   // take palettes from the playing track's album art
     bool trackTitles = true;    // show title/artist when a song starts
     bool autoCycle = false;     // new visualiser with each song
+    bool instantReplay = false; // keep the last 30 s ready to save as a video
+    std::wstring videoFolder;   // where recordings go (empty = Videos\Visualizer)
+    bool moodColour = true;     // tint the picture by the music's mood and chords
+    int displayMode = 0;        // fullscreen with several monitors: 0 one monitor, 1 each its own visualiser, 2 span
+    std::wstring monitor;       // the monitor for single-monitor fullscreen (device name; empty = where the window is)
 
     void Load();
     void Save() const;

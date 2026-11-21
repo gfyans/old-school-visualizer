@@ -37,6 +37,14 @@ public:
     }
     void Render(Renderer& renderer, float time, float dt);
 
+    // Multi-monitor: one region of the back buffer per monitor (client pixels). Region 0 shows the
+    // active visualiser (with transitions); each other region gets a different one. Empty = the
+    // whole window shows the active visualiser.
+    void SetRegions(const std::vector<RECT>& regions);
+    bool HasRegions() const { return !m_regions.empty(); }
+    RECT PrimaryRegion() const;   // where the active visualiser is (the whole window without regions)
+    void ShuffleExtras();         // new visualisers on the other monitors (e.g. on a new song)
+
     // Stats for the active visualiser.
     float ActiveScale() const { return m_slots[m_current].scale; }
     float ActiveGpuMs() const { return m_slots[m_current].timer.Milliseconds(); }
@@ -58,6 +66,7 @@ private:
         GpuTimer timer;
         float scale = 1.0f;    // current dynamic scale (<= preferred)
         float adjustTimer = 0.0f;
+        int baseW = 0, baseH = 0;  // size of the area it's shown in (0 = the whole window)
     };
 
     void EnsureTarget(Slot& slot);
@@ -67,6 +76,10 @@ private:
     void ViewportSize(const Slot& slot, int& w, int& h) const;
 
     std::vector<Slot> m_slots;
+    std::vector<RECT> m_regions;
+    std::vector<int> m_extra;   // visualiser shown in region i + 1
+    bool IsShown(int index) const;
+    void SetBase(Slot& slot, const RECT* region);
     float m_gpuBudgetMs = kDefaultGpuBudgetMs;
     ID3D11Device* m_device = nullptr;
     int m_width = 1, m_height = 1;

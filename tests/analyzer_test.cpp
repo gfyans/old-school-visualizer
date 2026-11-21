@@ -211,6 +211,90 @@ int main() {
     Check(tempoFactorAt[2] > tempoFactorAt[1] && tempoFactorAt[1] > tempoFactorAt[0], "tempo factor rises with tempo");
     Check(tempoFactorAt[3] > tempoFactorAt[2], "174 BPM counts as fast despite the half-time grid lock");
 
+    std::printf("Instruments: kick, snare on 2 and 4, eighth-note hats (120 BPM)\n");
+    {
+        std::mt19937 rng(7);
+        float prevNoise = 0.0f;
+        auto kit = [&](float t) {
+            const float beat = 0.5f;
+            const float sinceBeat = std::fmod(t, beat);
+            const int beatIndex = static_cast<int>(t / beat);
+            const float noise = std::uniform_real_distribution<float>(-1.0f, 1.0f)(rng);
+            const float bright = noise - prevNoise;   // first difference: high-passed noise
+            prevNoise = noise;
+            const float sinceHat = std::fmod(t, beat / 2);
+            float s = 0.7f * Kick(sinceBeat);
+            if (beatIndex % 2 == 1)   // snare on 2 and 4
+                s += 0.35f * noise * std::exp(-sinceBeat * 25.0f) + 0.4f * std::sin(2.0f * kPi * 190.0f * sinceBeat) * std::exp(-sinceBeat * 18.0f);
+            s += 0.12f * bright * std::exp(-sinceHat * 70.0f);
+            return s;
+        };
+        Result r = Run(12.0f, kit);
+        std::printf("    kicks %u, snares %u, hats %u (true: 24, 12, 48)\n", r.last.beatCount, r.last.snareCount, r.last.hatCount);
+        // (The first snare, at 0.5 s, falls in the detectors' 1 s warm-up.)
+        Check(r.last.snareCount >= 9 && r.last.snareCount <= 14, "snares counted within 9..14");
+        // Hats that land on a snare count as the snare, so up to 36 of the 48 can be heard as hats.
+        Check(r.last.hatCount >= 24 && r.last.hatCount <= 50, "hi-hats counted within 24..50");
+    }
+    {
+        auto kickBass = [](float t) {
+            return 0.7f * Kick(std::fmod(t, 0.5f)) + 0.3f * std::sin(2.0f * kPi * 55.0f * t);
+        };
+        Result r = Run(10.0f, kickBass);
+        std::printf("    kick + bass only: snares %u, hats %u\n", r.last.snareCount, r.last.hatCount);
+        Check(r.last.snareCount <= 1, "no snares from kicks and bass");
+        Check(r.last.hatCount <= 2, "no hi-hats from kicks and bass");
+    }
+
+    std::printf("Instruments: a sung-style tone vs a held pad\n");
+    {
+        // Harmonic stack on 220 Hz: "vocal" pulses with 5 Hz syllables and a little vibrato, "pad" holds.
+        auto voice = [](bool syllables) {
+            return [syllables](float t) {
+                const float f0 = 220.0f * (1.0f + (syllables ? 0.01f * std::sin(2.0f * kPi * 5.5f * t) : 0.0f));
+                float s = 0.0f;
+                for (int k = 1; k <= 12; ++k) s += std::sin(2.0f * kPi * f0 * k * t) / k;
+                const float env = syllables ? std::pow(std::max(0.0f, std::sin(2.0f * kPi * 4.0f * t)), 0.6f) : 1.0f;
+                return 0.25f * s * env;
+            };
+        };
+        float vocalV = 0, padV = 0, vocalP = 0, padP = 0;
+        int n = 0;
+        Run(8.0f, voice(true), [&](float t, const AudioFeatures& f) { if (t > 4.0f) { vocalV += f.vocal; padV += f.pad; ++n; } });
+        vocalV /= n; padV /= n; n = 0;
+        Run(8.0f, voice(false), [&](float t, const AudioFeatures& f) { if (t > 4.0f) { vocalP += f.vocal; padP += f.pad; ++n; } });
+        vocalP /= n; padP /= n;
+        std::printf("    sung: vocal %.2f pad %.2f   held: vocal %.2f pad %.2f\n", vocalV, padV, vocalP, padP);
+        Check(vocalV > padV && vocalV > 0.15f, "a syllabic tone reads as vocal");
+        Check(padP > vocalP && padP > 0.15f, "a held tone reads as pad");
+    }
+
+    std::printf("Harmony: key and chords\n");
+    {
+        auto note = [](float midi, float t) { return std::sin(2.0f * kPi * 440.0f * std::pow(2.0f, (midi - 69.0f) / 12.0f) * t); };
+        auto triad = [&](float root, bool minor, float t) {   // root position plus the octave, a little bass
+            return 0.18f * (note(root, t) + note(root + (minor ? 3.0f : 4.0f), t) + note(root + 7.0f, t) + note(root + 12.0f, t)) +
+                   0.12f * note(root - 12.0f, t);
+        };
+        // C - G - Am - F, two seconds each.
+        struct Chord { float root; bool minor; };
+        const Chord progression[] = { { 60, false }, { 67, false }, { 69, true }, { 65, false } };
+        Result r = Run(16.0f, [&](float t) {
+            const Chord& c = progression[static_cast<int>(t / 2.0f) % 4];
+            return triad(c.root, c.minor, t);
+        });
+        std::printf("    key %d %s (confidence %.2f), chord changes %u, last chord %d%s\n", r.last.key, r.last.minorKey ? "minor" : "major",
+            r.last.keyConfidence, r.last.chordCount, r.last.chordRoot, r.last.chordMinor ? "m" : "");
+        // C major or its relative minor (A minor: the same notes; telling them apart needs the bass line).
+        Check((r.last.key == 0 && !r.last.minorKey) || (r.last.key == 9 && r.last.minorKey), "C - G - Am - F reads as C major (or relative A minor)");
+        Check(r.last.chordCount >= 6 && r.last.chordCount <= 9, "chord changes counted (7 expected)");
+        Check(r.last.chordRoot == 5 && !r.last.chordMinor, "last chord is F major");
+
+        Result m = Run(14.0f, [&](float t) { return triad(57, true, t) + 0.5f * triad(64, false, t) * (std::fmod(t, 2.0f) > 1.5f ? 1.0f : 0.0f); });
+        std::printf("    A minor vamp: key %d %s\n", m.last.key, m.last.minorKey ? "minor" : "major");
+        Check(m.last.key == 9 && m.last.minorKey, "an A minor vamp reads as A minor");
+    }
+
     std::printf("Beat grid: tempo change 120 -> 140 BPM at 10 s\n");
     {
         float bpmAt15 = 0.0f;
