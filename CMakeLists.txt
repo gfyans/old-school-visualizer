@@ -61,6 +61,10 @@ compile_shader(galaxy_ps.hlsl        ps_5_0 g_galaxy_ps)
 compile_shader(galaxy_out_ps.hlsl    ps_5_0 g_galaxy_out_ps)
 compile_shader(fractal_ps.hlsl       ps_5_0 g_fractal_ps)
 compile_shader(capture_blit_ps.hlsl  ps_5_0 g_capture_blit_ps)
+compile_shader(signal_ps.hlsl        ps_5_0 g_signal_ps)
+compile_shader(signal_mesh_vs.hlsl   vs_5_0 g_signal_mesh_vs)
+compile_shader(signal_mesh_ps.hlsl   ps_5_0 g_signal_mesh_ps)
+compile_shader(detonation_ps.hlsl    ps_5_0 g_detonation_ps)
 compile_shader(capture_yuv_ps.hlsl   ps_5_0 g_capture_y_ps PLANE=0)
 compile_shader(capture_yuv_ps.hlsl   ps_5_0 g_capture_uv_ps PLANE=1)
 
@@ -94,12 +98,21 @@ add_executable(Visualizer WIN32
     src/viz/aurora/AuroraVisualizer.cpp
     src/viz/galaxy/GalaxyVisualizer.cpp
     src/viz/fractal/FractalVisualizer.cpp
+    src/viz/signal/SignalVisualizer.cpp
+    src/viz/detonation/DetonationVisualizer.cpp
     src/capture/Recorder.cpp
     src/update/Updater.cpp
     src/media/NowPlaying.cpp
     res/app.rc
     ${SHADER_HEADERS})
 set_source_files_properties(res/app.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/res/app.ico)
+# Signal's skull model: a third-party asset kept out of git (see tools/mesh/stl_to_mesh.py). Embedded
+# when present; without it Signal draws its procedural skull instead.
+if(EXISTS ${CMAKE_SOURCE_DIR}/assets/cyberskull.mesh)
+    target_sources(Visualizer PRIVATE res/models.rc)
+    set_source_files_properties(res/models.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/assets/cyberskull.mesh)
+    message(STATUS "Signal: embedding assets/cyberskull.mesh")
+endif()
 
 target_include_directories(Visualizer PRIVATE src ${SHADER_OUT})
 target_link_libraries(Visualizer PRIVATE audio_analysis d3d11 dxgi d2d1 dwrite ole32 shell32 windowsapp mfplat mfreadwrite mfuuid winhttp bcrypt)

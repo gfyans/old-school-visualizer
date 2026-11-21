@@ -17,6 +17,8 @@
 #include "viz/aurora/AuroraVisualizer.h"
 #include "viz/galaxy/GalaxyVisualizer.h"
 #include "viz/fractal/FractalVisualizer.h"
+#include "viz/signal/SignalVisualizer.h"
+#include "viz/detonation/DetonationVisualizer.h"
 #include "viz/spectrum/SpectrumVisualizer.h"
 
 #include <algorithm>
@@ -38,6 +40,8 @@ void RegisterVisualizers(VisualizerHost& host) {
     host.Add(std::make_unique<AuroraVisualizer>());
     host.Add(std::make_unique<GalaxyVisualizer>());
     host.Add(std::make_unique<FractalVisualizer>());
+    host.Add(std::make_unique<SignalVisualizer>());
+    host.Add(std::make_unique<DetonationVisualizer>());
     host.Add(std::make_unique<SpectrumVisualizer>());
 }
 
@@ -147,6 +151,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     bool moodColour = settings.moodColour;
     float gradeWarmth = 0.0f, gradeHue = 0.0f, gradeHueTarget = 0.0f, gradeAmount = moodColour ? 1.0f : 0.0f;
     uint32_t seenChord = 0;
+    // Glitch filter (X): ASCII / dither / LED / scan over any visualiser, palette changing on drops and songs.
+    int glitchFilter = settings.glitchFilter, glitchPalette = 0;
+    float glitchAmount = 0.0f;
+    uint32_t seenDrop = 0;
+    static const float kGlitchPalettes[4][4][3] = {   // bg, mid, hi, accent
+        { { 0.035f, 0.008f, 0.10f }, { 1.00f, 0.16f, 0.43f }, { 0.82f, 0.97f, 1.00f }, { 0.02f, 0.85f, 0.91f } },   // Noir
+        { { 0.015f, 0.04f, 0.02f },  { 0.20f, 0.90f, 0.30f }, { 0.85f, 1.00f, 0.60f }, { 1.00f, 0.90f, 0.10f } },   // Acid
+        { { 0.05f, 0.00f, 0.01f },   { 0.90f, 0.06f, 0.12f }, { 1.00f, 0.88f, 0.72f }, { 1.00f, 0.50f, 0.10f } },   // Blood
+        { { 0.00f, 0.02f, 0.06f },   { 0.12f, 0.45f, 0.95f }, { 0.90f, 0.97f, 1.00f }, { 0.65f, 0.25f, 1.00f } },   // Ice
+    };
+    static const wchar_t* kGlitchNames[] = { L"Glitch filter off", L"Glitch filter: ASCII", L"Glitch filter: dither",
+                                             L"Glitch filter: LED", L"Glitch filter: scan lines" };
     bool autoCycle = settings.autoCycle;
     float sinceSwitch = 0.0f;
     auto announce = [&] { overlay.ShowMessage(host.Active().Name()); sinceSwitch = 0.0f; };
@@ -254,6 +270,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         settings.instantReplay = recorder.InstantReplay();
         settings.videoFolder = videoFolder;
         settings.moodColour = moodColour;
+        settings.glitchFilter = glitchFilter;
         settings.displayMode = displayMode;
         settings.monitor = fullscreenMonitor;
         settings.Save();
@@ -310,6 +327,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
                 settings.lastUpdateCheck = updater.Start(settings.lastUpdateCheck, true);
                 overlay.ShowMessage(L"Checking for updates…", 2.0f);
             }
+            break;
+        case 'X':
+            glitchFilter = (glitchFilter + 1) % 5;
+            overlay.ShowMessage(kGlitchNames[glitchFilter], 1.5f);
             break;
         case 'K':
             moodColour = !moodColour;
@@ -429,6 +450,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             seenTrack = track.trackSerial;
             seenPalette = track.paletteSerial;
             if (newTrack && trackTitles) overlay.ShowTrack(track.title, track.artist);
+            if (newTrack) glitchPalette = (glitchPalette + 1) % 4;
             if (newTrack || newPalette) applyPalette(newTrack);
             // Auto-cycle: a new visualiser with each new song (not for the song already
             // playing when the app starts).
@@ -460,6 +482,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         gradeWarmth += (audio.mood - gradeWarmth) * (1.0f - std::exp(-dt / 3.0f));
         gradeAmount += ((moodColour ? 1.0f : 0.0f) - gradeAmount) * (1.0f - std::exp(-dt / 0.5f));
         renderer.SetGrade(gradeWarmth, gradeHue, gradeAmount);
+        if (audio.dropCount != seenDrop) { seenDrop = audio.dropCount; glitchPalette = (glitchPalette + 1) % 4; }
+        glitchAmount = std::max(glitchAmount * std::exp(-dt / 0.12f),
+                                std::min(1.0f, 0.7f * audio.snare + 0.6f * audio.buildUp * audio.buildUp + audio.drop));
+        // (Signal already is glitch art: no filter on top of it.)
+        const bool signalShown = std::wcscmp(host.Active().Name(), L"Signal") == 0;
+        renderer.SetFilter(signalShown ? 0 : glitchFilter, glitchAmount, static_cast<float>(std::fmod(time, 1000.0)), kGlitchPalettes[glitchPalette]);
         renderer.UploadAudio(audio);
         if (streamMode == 2) renderer.ClearBackBuffer(0.0f, 1.0f, 0.0f);   // bars on green: no visualiser
         else host.Render(renderer, static_cast<float>(time), dt);   // leaves the back buffer bound

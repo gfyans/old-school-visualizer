@@ -4,3 +4,5 @@ bin/
 # Real-music recordings for analyzer tuning: copyrighted audio, never commit.
 recordings/
 *.wav
+# Third-party models (e.g. Signal's skull): licensed separately, never commit.
+assets/

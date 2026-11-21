@@ -15,6 +15,16 @@ It listens to whatever your PC is playing (Spotify, a browser, games…) and ren
   changes shots on the downbeat, and drops make the black hole fire a quasar.
 * **Fractal flights**: fly down a winding tunnel through infinite raymarched fractals: Menger halls, a Mandelbox,
   Apollonian foam, coral and a cathedral, with rings and bands of light on the beat and hyperspeed on drops.
+* **Signal**: cyberpunk glitch art. A cyber skull (nodding with the vocals, eyes flaring on snares), a lattice
+  brain or a monolith turns in the dark, drawn as ASCII glyphs, hard-palette dithering, LED cells
+  or torn scan lines, over falling data rain. It alternates between one subject close up and a scrolling grid of
+  them filling the screen, each turning in a wave with kicks rippling across. Snares tear it, hi-hats flicker the
+  glyphs, build-ups dissolve it, drops flash it inside out and flood the screen.
+* **Detonation**: a vast city at night around a glowing spire. Kicks send rings of light across the rooftops,
+  build-ups charge the spire and spiral the clouds, and a drop erupts a white dome that tears at the buildings on
+  its rim and blows a ring through the clouds, then turns to a black sphere with a burning rim before collapsing
+  into a crater the city rebuilds. Night, manga Ink or Dusk looks; the camera cuts between an orbit, an avenue
+  flight, a rooftop skim, an overhead view and a distant witness.
 * **Spectrum**: classic bar spectrum.
 
 It also understands the music beyond loudness:
@@ -40,10 +50,10 @@ And it fits around you:
 | `←` `→` | Previous / next visualiser (with a random transition: crossfade, glitch cut, zoom-through, iris or pixel dissolve) |
 | `C` | Auto-cycle: a new visualiser with each song (or every 4 minutes without track info) |
 | `F`, `Alt+Enter`, double-click | Toggle fullscreen |
-| `N` | Next look (Nebula: palette + gas shape; Neon Grid / Aurora: colour scheme; Liquid: preset; Oscilloscope: mode; Galaxy: shape + colours; Fractal flights: world) |
+| `N` | Next look (Nebula: palette + gas shape; Neon Grid / Aurora: colour scheme; Liquid: preset; Oscilloscope: mode; Galaxy: shape + colours; Fractal flights: world; Signal: subject, style + palette; Detonation: Night / Ink / Dusk) |
 | `Space` | Lock / unlock the current look |
-| `M` | Galaxy: next camera shot |
-| `Q` | Galaxy: fire the quasar. Fractal flights: hyperspeed. Nebula: supernova (all as on a drop) |
+| `M` | Galaxy and Detonation: next camera shot. Signal: centre / grid |
+| `Q` | Galaxy: fire the quasar. Fractal flights: hyperspeed. Nebula: supernova. Detonation: detonate (all as on a drop) |
 | `P` | Nebula: summon a pulsar |
 | `B` | Cyberpunk equaliser bars along the bottom (neon LED segments, glitch tears on hard hits) |
 | `R` | Record to MP4 (press again to stop and save) |
@@ -52,6 +62,7 @@ And it fits around you:
 | `W` | Multiple monitors: one monitor → a different visualiser on each → one spanning all |
 | `G` | Fullscreen on the next monitor |
 | `K` | Mood colour on / off |
+| `X` | Glitch filter over any visualiser: ASCII → dither → LED → scan lines → off (the palette changes on drops and songs) |
 | `O` | Stream mode: clean (no on-screen text, 1920×1080 window) → EQ bars on green → off |
 | `A` | Album-art colours on / off |
 | `T` | Track titles on / off |
@@ -175,6 +186,9 @@ Measured on an RTX 3080 at 2560×1440 fullscreen:
 * Galaxy: about 0.75 ms GPU per frame for a million particles at full resolution. Each star works out its own orbit in
   the vertex shader, so there are no particle buffers or simulation; the smooth galaxy light is drawn analytically.
 * Fractal flights: about 0.3–1.3 ms GPU per frame depending on the world (50% resolution).
+* Detonation: about 1.5 ms GPU per frame (80% resolution; the city is traced cell by cell, exactly).
+* Signal: about 0.2–1.9 ms GPU per frame at full resolution (the skull model is drawn once per grid tile, up to 64;
+  the other subjects take one ray per glyph, dot or LED, and scan lines take three).
 * Spectrum: 0.01 ms GPU per frame.
 * CPU: under 1% of one core in a window, about 3.5% fullscreen with the stats overlay; about 20% more while
   recording or buffering instant replay.
@@ -214,6 +228,12 @@ Dev tools:
   flight path repeatable. Together they allow before/after comparisons.
 * `VISUALIZER_FAKE_MONITORS=2` splits one screen into side-by-side pretend monitors, to try the multi-monitor modes.
 * `tools\make_icon.ps1` regenerates `res\app.ico`.
+* Signal's skull is a third-party model, so it isn't in the repository. `python tools\mesh\stl_to_mesh.py model.stl
+  assets\cyberskull.mesh` converts a binary STL (decimated to about 110k triangles, with baked crevice shading); the
+  build embeds `assets\cyberskull.mesh` when it's there, and otherwise Signal draws a procedural skull.
+  `VISUALIZER_SIGNAL_LOOK=<style 1-4>,<subject 0-2>[,<grid rows 0-4>]` fixes Signal's look for comparisons.
+* `VISUALIZER_DETONATION=<look 0-2>,<shot 0-4>[,<seconds into a blast>]` fixes Detonation's look and camera shot
+  (and optionally holds one moment of a blast).
 
 ## Architecture
 
@@ -233,7 +253,7 @@ src/
   update/Updater            auto-update from GitHub releases: WinHTTP, SHA-256 check, swap on exit
   viz/Visualizer.h          the plug-in interface (IVisualizer)
   viz/VisualizerHost        offscreen targets, crossfades, adaptive resolution, one region per monitor
-  viz/nebula/, viz/neongrid/, viz/feedback/, viz/scope/, viz/aurora/, viz/galaxy/, viz/fractal/, viz/spectrum/
+  viz/nebula/, viz/neongrid/, viz/feedback/, viz/scope/, viz/aurora/, viz/galaxy/, viz/fractal/, viz/signal/, viz/spectrum/
   ui/Overlay                messages, now-playing caption, F1 stats, H help (DirectWrite)
   ui/EqBars                 optional equaliser bars drawn over any visualiser
 shaders/                    HLSL, compiled at build time into headers

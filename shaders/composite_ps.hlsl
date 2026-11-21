@@ -1,4 +1,4 @@
-#include "common.hlsli"
+#include "cyber.hlsli"
 
 // Final pass: scales the visualiser image(s) to the window, plays the transition
 // when switching visualisers, and dithers to hide 8-bit banding in dark gradients.
@@ -21,6 +21,14 @@ cbuffer Composite : register(b2) {
     float hueShift;    // radians: nudged by chord changes
     float gradeAmount; // 0 = off
     float gradePad;
+    float filterStyle; // glitch filter over any visualiser: 0 off, 1 ASCII, 2 dither, 3 LED, 4 scan (cyber.hlsli)
+    float glitch;      // 0..1: how hard rows tear (snares, build-ups, drops)
+    float filterTime;
+    float filterPad;
+    float3 palBg;   float palPad0;
+    float3 palMid;  float palPad1;
+    float3 palHi;   float palPad2;
+    float3 palAccent; float palPad3;
 };
 
 // Mood colour grade: a gentle warm/cool white balance and a small hue rotation (in YIQ space,
@@ -86,9 +94,38 @@ float3 Transition(float2 uv, float2 pixel) {
     return result;
 }
 
+float3 Fetch(float2 uv, float2 pixel) { return hasB > 0.5 ? Transition(uv, pixel) : SampleA(uv); }
+
+// The glitch filter: quantise the finished picture into cells and restyle each one.
+float3 Glitched(float2 uv) {
+    int style = (int)filterStyle;
+    float2 px = uv * iResolution;
+    float2 centre, local;
+    CyberCell(px, CyberCellSize(style, iResolution.y), centre, local);
+    float tear = CyberTear(centre.y, filterTime, glitch);
+    float2 cuv = (centre + float2(tear, 0.0)) / iResolution;
+    CyberPalette pal;
+    pal.bg = palBg; pal.mid = palMid; pal.hi = palHi; pal.accent = palAccent;
+    float3 result = 0;
+    if (style == kStyleAscii) result = CyberAscii(Fetch(cuv, centre), local, floor(px / CyberCellSize(style, iResolution.y)), glitch, filterTime, pal);
+    else if (style == kStyleDither) result = CyberDither(Fetch(cuv, centre), int2(floor(px / CyberCellSize(style, iResolution.y))), pal);
+    else if (style == kStyleLed) result = CyberLed(Fetch(cuv, centre), local);
+    else {
+        // Scan: RGB fringes (wider when it glitches) and streaks smeared out of bright areas to the left.
+        float split = (3.0 + 12.0 * glitch) / iResolution.x;
+        float3 streak = 0;
+        float reach = (8.0 + 30.0 * Hash33(int3((int)(centre.y / 4.0), 5, 9)).x) / iResolution.x;
+        [unroll] for (int k = 1; k <= 4; ++k) streak = max(streak, Fetch(cuv - float2(reach * k, 0), centre) * (1.0 - k * 0.2));
+        result = CyberScan(Fetch(cuv + float2(split, 0), centre), Fetch(cuv, centre), Fetch(cuv - float2(split, 0), centre), streak,
+                           local, floor(px / CyberCellSize(style, iResolution.y)), filterTime, glitch);
+    }
+    return result;
+}
+
 float4 main(VSOut i) : SV_Target {
-    float3 c = hasB > 0.5 ? Transition(i.uv, i.pos.xy) : SampleA(i.uv);
-    c = Grade(c);
+    float3 c;
+    if (filterStyle > 0.5) c = Glitched(i.uv);
+    else c = Grade(Fetch(i.uv, i.pos.xy));
     c += (InterleavedGradientNoise(i.pos.xy) - 0.5) / 255.0;
     return float4(c, 1);
 }

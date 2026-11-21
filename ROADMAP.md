@@ -1,49 +1,42 @@
 # Roadmap
 
-Ideas for where this could go, roughly in order of impact. ✅ = done.
+Where this is going next, in order. ✅ = done.
 
-## 1. Smarter listening
-- ✅ **Tempo and beat-grid tracking.** Lock to the song's BPM and *predict* beats, so motion lands exactly on them (including moves across 4/8 bars).
-- ✅ **Song structure.** Detect build-ups and drops: tighten and accelerate during a build, explode into a new look on the drop.
-- ✅ **Real-music tuning.** Recorder and replay tools; tracker, confidence and structure calibrated on six real songs.
-- **Harder rhythms.** Beat placement on thrash metal and syncopated techno (occasional quarter-beat slips).
-  - ✅ **Lock faster after a beatless intro.** Trust builds faster than it falls (mean grid F 0.43 → 0.47).
-  - Tried and rejected on the recordings: a second-order (tempo-trimming) phase lock (worse on hip-hop).
-  - Still open: a look-ahead dynamic-programming phase stage for thrash and syncopated techno.
-- ✅ **Mood and key.** Key and chords from a chroma profile; minor/slow songs cool the picture, energetic ones warm it; chord changes nudge the hue (`K`).
-  - ✅ **Tempo-driven pace.** Every scene's motion scales with the song's BPM (half-time locks corrected).
-- ✅ **Instrument detection.** Lightweight DSP detectors for kick, snare, hi-hats, voice and pads, each driving its own details. (True source separation with a neural model was left out to keep the exe small and light.)
-- ✅ **Now playing.** Read title and album art from Windows media controls; take the palette from the album art; show the title at song start.
-- ✅ **Equaliser bars overlay.** Stylish glass bars along the bottom, over any visualiser (`B`).
+## Up next
 
-## 2. More visualisers
-- ✅ **Milkdrop-style feedback** ("Liquid"). Each frame warps and fades the previous one: infinite tunnels and liquid trails.
-- ✅ **Particle galaxy** ("Galaxy"). A million GPU particles around a black hole with lensing; bass drives gravity, beats send shockwaves through the arms, a camera director cuts on downbeats, drops fire a quasar.
-- ✅ **Oscilloscope / vector display.** The real waveform on a CRT: phosphor afterglow, curved glass, four modes including an X/Y vectorscope.
-- ✅ **Fractal flights.** Flying through five infinite raymarched fractal worlds that breathe with the music; hyperspeed on drops.
-- ✅ **Synthwave terrain** ("Neon Grid"). Neon grid landscape whose mountains are the scrolling spectrum history.
-- ✅ **Aurora.** Soft ribbons of northern lights over a frozen forest lake, reflected in the ice.
-- **More worlds for Fractal flights.** A Mandelbulb set piece and a working Kleinian cave world.
+1. **Synced lyrics.** Time-coded lyrics for the playing track from a free lyrics database, set as kinetic typography
+   in the scene: words punch in on the beat, explode on drops, and glitch in Signal.
+2. **Director mode.** Choreograph the whole song from its structure: a calm scene for the intro, a tunnel for the
+   build, Detonation on the drop, the aurora for the outro. A music video, made live.
+3. **Album-art scenes.** The cover shatters into 3D voxels that pulse, orbit and reassemble on the downbeat.
+4. **Phone remote.** Scan a QR code and your phone becomes a controller on your home network: switch scenes, lock
+   looks, trigger the quasar, supernova or detonation.
 
-## 3. Nebula upgrades
-- ✅ **Temporal accumulation (TAA-style).** Reproject and blend previous frames to remove grain: sharper *and* cheaper.
-- ✅ **Real light scattering.** Each gas sample looks towards the core: lit rims, dark undersides, god rays through the gaps.
-- ✅ **Bloom** on bright spots, and a lens flare on the supernova.
-- ✅ **Events.** A pulsar whose beams sweep through the gas in time with the bar, and a supernova on drops. (Comets were tried and dropped.)
-- ✅ **Directed flight.** Swoops to a new heading every 8 bars, banking into the turn; build-ups dive towards the core.
-
-## 4. Feel and interaction
-- ✅ **Auto-cycle mode.** Switch visualisers on song change or every N minutes.
-- ✅ **Transitions with character.** Dissolves, zoom-throughs and warps instead of crossfades.
-- **Mouse / gamepad control.** Steer the camera; a "chill ↔ intense" reactivity slider.
+## Later
+- **Shader workshop.** Hot-reload while music plays, import Shadertoy shaders with the audio mapped in, and have
+  Claude write a new visualiser from a description.
 - **Presets and favourites.** Save looks you love.
 - **Screensaver build.** The same exe as a `.scr`.
+- **Signal: a head in profile** built from a proper model, like the skull.
+- **More worlds for Fractal flights.** A Mandelbulb set piece and a working Kleinian cave world.
+- **Harder rhythms.** A look-ahead dynamic-programming phase stage for thrash metal and syncopated techno.
+- **Transparent window for OBS** (DirectComposition) instead of chroma key.
 
-## 5. Beyond the screen
-- ✅ **Multi-monitor.** Choose the monitor, a different visualiser on each, or one spanning all (`W`, `G`).
+## Parked
 - **RGB sync.** Drive SteelSeries / Razer / Hue lighting from the same analysis and palette.
-- ✅ **Stream / capture mode.** MP4 recording with the music (`R`), instant replay of the last 30 s (`I`, `S`), and a
-  stream mode for OBS: clean output or EQ bars on chroma-key green (`O`).
-  - Maybe later: a truly transparent window (DirectComposition) instead of chroma key.
-- **Shader hot-reload and live editor.** Write visualisers while music plays; load Shadertoy shaders with audio mapped in.
-- **AI visualiser generation.** Describe a scene and have Claude write the shader into the framework.
+
+## Cut
+- MIDI controller mapping (niche; the phone remote covers live control), live desktop wallpaper (relies on a fragile
+  Windows hack), automatic highlight reels (instant replay covers most of it), mouse / gamepad camera control.
+
+## Done
+- **Listening:** ✅ tempo and beat-grid prediction; ✅ build-ups and drops; ✅ tuned on real recordings; ✅ faster
+  lock after beatless intros; ✅ tempo-driven pace; ✅ instrument detection (kick, snare, hats, voice, pads); ✅ key,
+  chords and mood colour; ✅ now playing with album-art palettes; ✅ equaliser bars.
+- **Visualisers:** ✅ Nebula (TAA, light scattering, bloom, pulsar, supernova, directed flight); ✅ Neon Grid;
+  ✅ Liquid; ✅ Oscilloscope; ✅ Aurora; ✅ Galaxy; ✅ Fractal flights; ✅ Signal (skull model, centre and
+  grid layouts, ASCII / dither / LED / scan lines); ✅ Detonation (city, dome, void, crater, camera director);
+  ✅ Spectrum.
+- **Feel:** ✅ auto-cycle; ✅ transitions with character; ✅ glitch filter over every scene (`X`).
+- **Beyond the screen:** ✅ multi-monitor; ✅ MP4 recording and instant replay; ✅ stream mode for OBS;
+  ✅ automatic updates.

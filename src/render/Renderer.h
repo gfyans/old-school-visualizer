@@ -2,6 +2,7 @@
 #include <d2d1_1.h>
 #include <d3d11.h>
 #include <dxgi1_3.h>
+#include <cstring>
 #include <wrl/client.h>
 #include "audio/AudioFeatures.h"
 
@@ -25,6 +26,7 @@ struct AudioConstants {
     float spectrum[AudioFeatures::kSpectrumBands];
     float tempo[4];       // bpm, beat phase, bar phase, confidence
     float structure[4];   // build-up, drop pulse, grid beat count, drop count
+    float instruments[4]; // snare, hi-hat, vocal, pad
     float waveform[AudioFeatures::kWaveformPoints];
 };
 static_assert(sizeof(AudioConstants) % 16 == 0);
@@ -67,6 +69,11 @@ public:
     // Mood colour grade applied by Composite: warmth -1 (cool) .. +1 (warm), hue in radians,
     // amount 0 (off) .. 1.
     void SetGrade(float warmth, float hue, float amount) { m_gradeWarmth = warmth; m_gradeHue = hue; m_gradeAmount = amount; }
+    // Glitch filter applied by Composite (style 0 = off; see shaders/cyber.hlsli). palette: bg, mid, hi, accent.
+    void SetFilter(int style, float glitch, float time, const float palette[4][3]) {
+        m_filterStyle = style; m_glitch = glitch; m_filterTime = time;
+        memcpy(m_palette, palette, sizeof(m_palette));
+    }
     void ClearBackBuffer(float r = 0.0f, float g = 0.0f, float b = 0.0f);
 
     ID2D1DeviceContext* BeginOverlay();   // draws onto the back buffer; nullptr if unavailable
@@ -97,6 +104,9 @@ private:
     ID3D11RenderTargetView* m_boundRTV = nullptr;   // not owned
     int m_boundW = 0, m_boundH = 0;
     float m_gradeWarmth = 0.0f, m_gradeHue = 0.0f, m_gradeAmount = 0.0f;
+    int m_filterStyle = 0;
+    float m_glitch = 0.0f, m_filterTime = 0.0f;
+    float m_palette[4][3] = {};
 
     ComPtr<ID3D11Device> m_device;
     ComPtr<ID3D11DeviceContext> m_context;

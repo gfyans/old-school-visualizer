@@ -59,6 +59,8 @@ void Settings::Load() {
     autoCycle = ReadInt(file, L"AutoCycle", 0) != 0;
     instantReplay = ReadInt(file, L"InstantReplay", 0) != 0;
     moodColour = ReadInt(file, L"MoodColour", 1) != 0;
+    glitchFilter = ReadInt(file, L"GlitchFilter", 0);
+    if (glitchFilter < 0 || glitchFilter > 4) glitchFilter = 0;
     autoUpdate = ReadInt(file, L"AutoUpdate", 1) != 0;
     lastUpdateCheck = _wtoi64(ReadString(file, L"LastUpdateCheck").c_str());
 }
@@ -85,6 +87,7 @@ void Settings::Save() const {
     WriteInt(file, L"AutoCycle", autoCycle ? 1 : 0);
     WriteInt(file, L"InstantReplay", instantReplay ? 1 : 0);
     WriteInt(file, L"MoodColour", moodColour ? 1 : 0);
+    WriteInt(file, L"GlitchFilter", glitchFilter);
     WriteInt(file, L"AutoUpdate", autoUpdate ? 1 : 0);
     WriteString(file, L"LastUpdateCheck", std::to_wstring(lastUpdateCheck));
 }

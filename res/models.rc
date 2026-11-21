@@ -1,0 +1,5 @@
+#include <winres.h>
+
+// Signal's skull model (built from a third-party STL by tools/mesh/stl_to_mesh.py; not in git).
+// Only compiled in when assets/cyberskull.mesh exists (see CMakeLists.txt).
+101 RCDATA "../assets/cyberskull.mesh"

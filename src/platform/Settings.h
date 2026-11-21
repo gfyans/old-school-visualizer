@@ -18,6 +18,7 @@ struct Settings {
     bool instantReplay = false; // keep the last 30 s ready to save as a video
     std::wstring videoFolder;   // where recordings go (empty = Videos\Visualizer)
     bool moodColour = true;     // tint the picture by the music's mood and chords
+    int glitchFilter = 0;       // 0 off, 1 ASCII, 2 dither, 3 LED, 4 scan
     bool autoUpdate = true;     // check GitHub for new versions (at most daily) and install them on exit
     long long lastUpdateCheck = 0;   // unix seconds
     int displayMode = 0;        // fullscreen with several monitors: 0 one monitor, 1 each its own visualiser, 2 span

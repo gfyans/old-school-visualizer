@@ -16,7 +16,7 @@ const wchar_t* const kHelpLines[][2] = {
     { L"Space", L"Lock / unlock the current look" },
     { L"B", L"Equaliser bars along the bottom" },
     { L"W  /  G", L"Multi-monitor mode  /  next monitor" },
-    { L"K", L"Mood colour on / off" },
+    { L"K  /  X", L"Mood colour on / off  /  glitch filter" },
     { L"O", L"Stream mode: clean / bars on green / off" },
     { L"D", L"Cycle audio device" },
     { L"A", L"Album-art colours on / off" },

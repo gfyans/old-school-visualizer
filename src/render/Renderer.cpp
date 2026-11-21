@@ -13,6 +13,8 @@ struct CompositeConstants {   // matches shaders/composite_ps.hlsl
     float uvScaleB[2], uvMaxB[2];
     float mix, hasB, style, seed;
     float warmth, hueShift, gradeAmount, gradePad;
+    float filterStyle, glitch, filterTime, filterPad;
+    float pal[4][4];   // bg, mid, hi, accent (rgb + pad)
 };
 
 template <typename T>
@@ -189,6 +191,10 @@ void Renderer::UploadAudio(const AudioFeatures& audio) {
     ac.structure[1] = audio.drop;
     ac.structure[2] = static_cast<float>(audio.gridBeat);
     ac.structure[3] = static_cast<float>(audio.dropCount);
+    ac.instruments[0] = audio.snare;
+    ac.instruments[1] = audio.hat;
+    ac.instruments[2] = audio.vocal;
+    ac.instruments[3] = audio.pad;
     memcpy(ac.waveform, audio.waveform, sizeof(ac.waveform));
     UploadConstants(m_context.Get(), m_audioCB.Get(), ac);
 }
@@ -251,6 +257,10 @@ void Renderer::Composite(const CompositeLayer& a, const CompositeLayer* b, float
     cc.warmth = m_gradeWarmth;
     cc.hueShift = m_gradeHue;
     cc.gradeAmount = m_gradeAmount;
+    cc.filterStyle = static_cast<float>(m_filterStyle);
+    cc.glitch = m_glitch;
+    cc.filterTime = m_filterTime;
+    for (int k = 0; k < 4; ++k) memcpy(cc.pal[k], m_palette[k], 3 * sizeof(float));
     UploadConstants(m_context.Get(), m_compositeCB.Get(), cc);
 
     ID3D11ShaderResourceView* srvs[2] = { a.srv, b ? b->srv : nullptr };

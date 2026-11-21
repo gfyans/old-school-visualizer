@@ -18,6 +18,7 @@ cbuffer Audio : register(b1) {
     float4 aSpectrum[16]; // 64 log-spaced bands, 30 Hz - 16 kHz
     float4 aTempo;        // x bpm (0 = unknown), y beat phase 0..1, z bar phase 0..1, w confidence
     float4 aStructure;    // x build-up 0..1, y drop pulse, z grid beat count, w drop count
+    float4 aInstruments;  // x snare hit, y hi-hat hit (both 1 on a hit, decaying), z vocal, w pad (levels)
     float4 aWaveform[32]; // 128 points, -1..1, oscilloscope-triggered
 };
 
