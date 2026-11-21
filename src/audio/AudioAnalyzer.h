@@ -50,6 +50,7 @@ private:
     float m_referenceDb = -50.0f;
     float m_fluxMean = 0, m_fluxVar = 0;
     float m_timeSinceBeat = 10.0f;
+    float m_onsetInterval = 0.5f;   // smoothed seconds between heard onset beats
     float m_wavePeak = 0.01f;
     float m_scopePeak = 0.01f;
 

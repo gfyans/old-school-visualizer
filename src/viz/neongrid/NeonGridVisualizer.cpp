@@ -192,7 +192,8 @@ void NeonGridVisualizer::Update(const AudioFeatures& audio, float dt) {
 
     // --- Flight: speed from intensity and build-ups; calm drift in silence ---
     const float targetSpeed = audio.silent ? 2.5f : 4.0f + 9.0f * audio.intensity + 8.0f * m_buildUp;
-    m_speed = Smooth(m_speed, targetSpeed, dt, 1.0f, 2.0f);
+    const float tf = audio.tempoFactor;   // faster songs animate faster
+    m_speed = Smooth(m_speed, targetSpeed * tf, dt, 1.0f, 2.0f);
     m_travel += double(m_speed) * dt;
     m_pulseZ -= m_speed * dt * 1.5f;   // the beat ring rushes towards the camera
     while (m_travel >= m_nextRowAt) {

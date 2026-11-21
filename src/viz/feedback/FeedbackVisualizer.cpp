@@ -159,8 +159,9 @@ void FeedbackVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_mids = Smooth(m_mids, 0.5f * (audio.lowMid + audio.highMid), dt, 0.1f, 0.5f);
     m_treble = Smooth(m_treble, audio.treble, dt, 0.02f, 0.2f);
     m_buildUp = Smooth(m_buildUp, audio.buildUp, dt, 0.5f, 0.3f);
-    m_hue += dt * (0.01f + 0.03f * m_mids);
-    m_warpPhase += dt * (1.0f + 2.0f * m_mids + 2.0f * m_buildUp);
+    const float tf = audio.tempoFactor;   // faster songs animate faster
+    m_hue += dt * tf * (0.01f + 0.03f * m_mids);
+    m_warpPhase += dt * tf * (1.0f + 2.0f * m_mids + 2.0f * m_buildUp);
 
     // --- This frame's warp, scaled so motion is independent of frame rate ---
     const Params p = Current();

@@ -134,7 +134,7 @@ void Overlay::Draw(ID2D1DeviceContext* ctx, int width, int height, const Overlay
 
 void Overlay::DrawStats(ID2D1DeviceContext* ctx, const OverlayStats& s, const AudioFeatures& a) {
     wchar_t tempo[64];
-    if (a.bpm > 0.0f) swprintf_s(tempo, L"%.1f bpm (%.0f%%)", a.bpm, a.tempoConfidence * 100.0f);
+    if (a.bpm > 0.0f) swprintf_s(tempo, L"%.1f bpm (%.0f%%)  speed x%.2f", a.bpm, a.tempoConfidence * 100.0f, a.tempoFactor);
     else wcscpy_s(tempo, L"--");
     wchar_t buf[1024];
     swprintf_s(buf,

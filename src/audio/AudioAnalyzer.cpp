@@ -124,6 +124,8 @@ void AudioAnalyzer::Update(const float* samples, float sampleRate, bool newData,
 
         const float threshold = m_fluxMean + 1.5f * std::sqrt(m_fluxVar) + 0.1f;
         if (flux > threshold && groups[0] > 0.3f && m_timeSinceBeat > 0.28f) {
+            // How often hits are actually heard (smoothed), to spot half-time grid locks.
+            if (m_timeSinceBeat < 1.5f) m_onsetInterval += 0.15f * (m_timeSinceBeat - m_onsetInterval);
             f.beat = 1.0f;
             ++f.beatCount;
             m_timeSinceBeat = 0.0f;
@@ -145,6 +147,20 @@ void AudioAnalyzer::Update(const float* samples, float sampleRate, bool newData,
     // Without drums a "beat" is at best a soft pulse: don't let visuals lock onto it hard.
     const float drumFactor = std::clamp((grid.percussive - 0.22f) / 0.14f, 0.0f, 1.0f);
     f.tempoConfidence = f.silent ? 0.0f : grid.confidence * drumFactor;
+    // Tempo factor for animation speed: follow the tempo while it's trusted, hold it through
+    // breaks, drift back to neutral in silence.
+    if (f.silent) {
+        f.tempoFactor = Smooth(f.tempoFactor, 1.0f, dt, 6.0f, 6.0f);
+    } else if (grid.bpm > 0.0f && grid.confidence > 0.3f) {
+        float bpm = grid.bpm;
+        if (bpm < 70.0f) bpm *= 2.0f;
+        // The grid may lock at half-time (174 BPM drum & bass counted as 87); if hits are heard
+        // about twice as often as the grid, the song is fast.
+        if (bpm < 110.0f && 60.0f / m_onsetInterval > 1.7f * bpm) bpm *= 2.0f;
+        if (bpm > 180.0f) bpm *= 0.5f;
+        const float target = std::clamp(std::pow(bpm / 120.0f, 0.85f), 0.7f, 1.4f);
+        f.tempoFactor = Smooth(f.tempoFactor, target, dt, 2.5f, 2.5f);
+    }
 
     // --- Structure & waveform ---
     double bassP = 0, highP = 0, totalP = 0;

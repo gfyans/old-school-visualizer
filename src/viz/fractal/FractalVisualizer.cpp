@@ -166,9 +166,10 @@ void FractalVisualizer::Update(const AudioFeatures& audio, float dt) {
 
     // The flight: faster with intensity and build-ups, surging on kicks, hyperspeed on drops.
     const float cruise = audio.silent ? 0.25f : 0.45f + 0.8f * m_intensity + 0.9f * m_buildUp;
-    m_speed = Smooth(m_speed, cruise, dt, 1.5f, 2.5f);
+    const float tf = audio.tempoFactor;   // faster songs animate faster
+    m_speed = Smooth(m_speed, cruise * tf, dt, 1.5f, 2.5f);
     m_z += dt * (m_speed + 0.25f * m_kick + 6.0f * m_hyper);
-    m_spin += dt * m_spinDir * (audio.silent ? 0.03f : 0.04f + 0.2f * m_mids + 0.25f * m_buildUp);
+    m_spin += dt * tf * m_spinDir * (audio.silent ? 0.03f : 0.04f + 0.2f * m_mids + 0.25f * m_buildUp);
 
     // Bank into the curves.
     const float ahead = 1.5f;

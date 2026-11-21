@@ -166,6 +166,8 @@ int main() {
     }
 
     std::printf("Beat grid: tempo and phase\n");
+    float tempoFactorAt[4] = {};
+    int tempoIndex = 0;
     for (float bpm : { 120.0f, 128.0f, 140.0f, 174.0f }) {
         // Phase check: at each true kick in the last 4 s, the predicted phase should be ~0.
         const float period = 60.0f / bpm;
@@ -201,7 +203,13 @@ int main() {
         std::snprintf(label, sizeof(label), "%.0f BPM: predicted beats within %.0f ms of kicks%s", bpm, limitMs,
             halfTime ? " (half-time lock)" : "");
         Check(meanMs < limitMs, label);
+        tempoFactorAt[tempoIndex++] = r.last.tempoFactor;
     }
+    std::printf("    tempo factor: 120 -> %.2f, 128 -> %.2f, 140 -> %.2f, 174 -> %.2f\n",
+        tempoFactorAt[0], tempoFactorAt[1], tempoFactorAt[2], tempoFactorAt[3]);
+    Check(std::fabs(tempoFactorAt[0] - 1.0f) < 0.08f, "tempo factor ~1 at 120 BPM");
+    Check(tempoFactorAt[2] > tempoFactorAt[1] && tempoFactorAt[1] > tempoFactorAt[0], "tempo factor rises with tempo");
+    Check(tempoFactorAt[3] > tempoFactorAt[2], "174 BPM counts as fast despite the half-time grid lock");
 
     std::printf("Beat grid: tempo change 120 -> 140 BPM at 10 s\n");
     {

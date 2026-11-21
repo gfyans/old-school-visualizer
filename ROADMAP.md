@@ -9,6 +9,7 @@ Ideas for where this could go, roughly in order of impact. ✅ = done.
 - **Harder rhythms.** Beat placement on thrash metal and syncopated techno (occasional quarter-beat slips), e.g. a
   look-ahead dynamic-programming phase stage. Lock faster after a beatless intro.
 - **Mood and key.** Minor/slow songs pull towards calm, cool palettes; energetic tracks go warm and fast. Chord changes shift hue.
+  - ✅ **Tempo-driven pace.** Every scene's motion scales with the song's BPM (half-time locks corrected).
 - **Instrument separation.** Real-time source separation (kick, snare, vocals, synths) so each can drive its own visual element.
 - ✅ **Now playing.** Read title and album art from Windows media controls; take the palette from the album art; show the title at song start.
 - ✅ **Equaliser bars overlay.** Stylish glass bars along the bottom, over any visualiser (`B`).

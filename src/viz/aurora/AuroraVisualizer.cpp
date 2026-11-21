@@ -126,7 +126,7 @@ void AuroraVisualizer::Update(const AudioFeatures& audio, float dt) {
 
     // Slow, smooth drivers: auroras move gracefully even when the music doesn't.
     const float speed = audio.silent ? 0.35f : 0.5f + 1.2f * m_mids + 0.8f * m_buildUp;
-    m_anim += dt * speed;
+    m_anim += dt * speed * audio.tempoFactor;   // faster songs animate faster
     const float targetBright = audio.silent ? 0.45f : 0.55f + 0.5f * audio.intensity + 0.35f * m_bass + 0.4f * m_buildUp + 0.8f * m_surge;
     m_brightness = Smooth(m_brightness, targetBright, dt, 0.25f, 1.2f);
     m_sway = Smooth(m_sway, 0.8f + 0.7f * m_mids, dt, 1.0f, 2.0f);

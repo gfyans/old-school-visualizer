@@ -74,6 +74,9 @@ Press `D` until the device your music plays on is selected.
 * **Confidence** comes from phase consistency (a real beat keeps agreeing with itself), scaled down when there are no
   drums. Visuals only follow the grid above ~0.4. `F1` shows BPM and confidence; the lower beat lamp flashes on the
   predicted beat.
+* **Tempo sets the pace.** Every scene animates faster for faster songs and slower for slow ones: ×1 at
+  120 BPM, about ×0.75 at 85 and ×1.3 at 170 (clamped to 0.7–1.4). When the grid locks at half-time (drum & bass
+  counted at 87), the rate of heard hits reveals the real tempo. `F1` shows the factor next to the BPM.
 * **Drums present** (`percussive`): drum hits make many frequency bands jump at once, while tonal notes light up a few.
 * **Build-ups:** the high band rising steadily over several seconds, especially with the bass cut.
 * **Drops:** the bass returning after at least 1.5 s away, or a big level jump after a build. These are measured

@@ -358,7 +358,8 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
     // Build-ups accelerate the flight; drops hit hard then settle.
     const float targetSpeed = audio.silent ? 0.25f
         : 0.35f + 1.1f * audio.intensity + 0.5f * audio.bass + 0.25f * m_beatPulse + 1.2f * m_buildUp;
-    m_speed = Smooth(m_speed, targetSpeed, dt, 0.5f, 2.0f);
+    const float tf = audio.tempoFactor;   // faster songs animate faster
+    m_speed = Smooth(m_speed, targetSpeed * tf, dt, 0.5f, 2.0f);
     const float flySpeed = m_speed + 3.5f * m_hyper;
 
     // Beat zoom: small and eased in (never a one-frame jump), which is what avoids motion sickness.
@@ -373,8 +374,8 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
     const float targetLight = audio.silent ? 0.6f : 0.6f + 0.7f * m_bass + 0.9f * pulse + 0.6f * m_buildUp;
     m_lightStrength = Smooth(m_lightStrength, targetLight, dt, 0.03f, 0.35f);
 
-    m_swirl += dt * (0.003f + 0.02f * m_mids + 0.03f * m_buildUp);   // tension: the gas churns faster
-    m_rollDrift += dt * (0.04f * m_mids + 0.05f * m_buildUp);
+    m_swirl += dt * tf * (0.003f + 0.02f * m_mids + 0.03f * m_buildUp);   // tension: the gas churns faster
+    m_rollDrift += dt * tf * (0.04f * m_mids + 0.05f * m_buildUp);
 
     // --- Camera: directed flight. Every 8 bars (or ~16 s) the flight swoops to a new heading,
     // easing into the turn and banking with it; a gentle wander stops it feeling on rails.

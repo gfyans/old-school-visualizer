@@ -28,6 +28,10 @@ struct AudioFeatures {
     uint32_t gridBeat = 0;      // increments on every predicted beat
     float tempoConfidence = 0;  // 0..1: use the grid when this is high (> ~0.4)
     float percussive = 0;       // 0..1: drums present above ~0.36; solo piano / pads below ~0.3
+    // How fast scenes should animate for this song's tempo: 1 at 120 BPM, about 0.75 at 85,
+    // 1.25 at 155 (clamped 0.7..1.4). Glides when the tempo changes, holds through beatless
+    // breaks, and eases back to 1 in silence. Multiply animation rates by it.
+    float tempoFactor = 1;
 
     // --- Song structure ---
     float buildUp = 0;          // 0..1: rising tension (risers, rolls, bass pulled out)

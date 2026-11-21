@@ -296,12 +296,13 @@ void GalaxyVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_cam.focal = Smooth(m_cam.focal, target.focal, dt, m_camTau, m_camTau);
     m_cam.roll = Smooth(m_cam.roll, target.roll, dt, m_camTau, m_camTau);
     m_cam.side = Smooth(m_cam.side, target.side, dt, m_camTau, m_camTau);
-    m_yaw += dt * m_cam.yawSpeed * (audio.silent ? 0.5f : 1.0f + 1.2f * m_gravity + 2.0f * m_buildUp);
+    const float tf = audio.tempoFactor;   // faster songs animate faster
+    m_yaw += dt * tf * m_cam.yawSpeed * (audio.silent ? 0.5f : 1.0f + 1.2f * m_gravity + 2.0f * m_buildUp);
 
     // Galaxy motion: gravity (bass) spins everything faster.
     const float spin = audio.silent ? 0.03f : 0.05f + 0.25f * m_gravity + 0.15f * m_buildUp;
-    m_pattern += dt * spin;
-    m_accSpin += dt * (audio.silent ? 0.6f : 1.2f + 4.0f * m_gravity + 3.0f * m_quasar);
+    m_pattern += dt * tf * spin;
+    m_accSpin += dt * tf * (audio.silent ? 0.6f : 1.2f + 4.0f * m_gravity + 3.0f * m_quasar);
     m_anim += dt;
 }
 
