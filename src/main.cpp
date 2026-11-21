@@ -8,6 +8,7 @@
 #include "render/Renderer.h"
 #include "ui/EqBars.h"
 #include "ui/Overlay.h"
+#include "update/Updater.h"
 #include "viz/VisualizerHost.h"
 #include "viz/feedback/FeedbackVisualizer.h"
 #include "viz/nebula/NebulaVisualizer.h"
@@ -61,8 +62,11 @@ void Fatal(const wchar_t* message) {
 
 } // namespace
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    // An update downloaded last time but not swapped in (the app didn't close cleanly): do it now.
+    if (Updater::ApplyAtStartup()) return 0;
+    const bool justUpdated = cmdLine && wcsstr(cmdLine, L"--updated");
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // for audio device enumeration
 
     Settings settings;
@@ -114,6 +118,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     uint64_t lastSampleCount = 0;
     capture->SetPreferredDevice(settings.audioDevice);
     capture->Start();
+
+    // Updates from GitHub releases: checked in the background, installed when the app closes.
+    Updater updater;
 
     // Video recording (MP4 with the music): instant replay and start/stop.
     Recorder recorder;
@@ -294,6 +301,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             if (streamMode == 0) overlay.ShowMessage(kModes[0], 1.5f);
             break;
         }
+        case 'U':
+            if (updater.Ready()) {
+                saveSettings();
+                if (updater.RestartNow()) window.Close();
+                else overlay.ShowMessage(L"Couldn't install the update", 2.5f);
+            } else {
+                settings.lastUpdateCheck = updater.Start(settings.lastUpdateCheck, true);
+                overlay.ShowMessage(L"Checking for updates…", 2.0f);
+            }
+            break;
         case 'K':
             moodColour = !moodColour;
             overlay.ShowMessage(moodColour ? L"Mood colour on: the picture warms and cools with the music" : L"Mood colour off", 2.5f);
@@ -352,6 +369,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     updateMonitor();
 
     overlay.ShowMessage(std::wstring(host.Active().Name()) + L"   ·   press H for help", 4.0f);
+    if (justUpdated) overlay.ShowMessage(std::wstring(L"Updated to version ") + Updater::CurrentVersion(), 4.0f);
+    if (settings.autoUpdate) settings.lastUpdateCheck = updater.Start(settings.lastUpdateCheck, false);
 
     Clock clock;
     double time = 0.0;
@@ -453,6 +472,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         eqBars.Render(renderer);
         recorder.CaptureFrame(renderer);   // what's recorded: the visuals and bars, not the text overlays
         if (std::wstring note = recorder.TakeMessage(); !note.empty()) overlay.ShowMessage(note, 4.0f);
+        if (std::wstring note = updater.TakeMessage(); !note.empty()) overlay.ShowMessage(note, 4.0f);
         if (recorder.Recording()) {
             const int secs = static_cast<int>(recorder.RecordingSeconds());
             wchar_t rec[32];
@@ -514,5 +534,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             statsTimer = 0.0f;
         }
     }
+    updater.ApplyOnExit();   // a downloaded update takes over from the next launch
     return 0;
 }

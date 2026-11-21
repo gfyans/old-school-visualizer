@@ -1,7 +1,7 @@
 # Visualizer
 
 A modern take on the Winamp-era music visualiser. A single small `.exe` with no installer and no runtime to install.
-It listens to whatever your PC is playing (Spotify, a browser, gamesâ€¦) and renders it on the GPU.
+It listens to whatever your PC is playing (Spotify, a browser, games…) and renders it on the GPU.
 
 * **Nebula**: fly through a glowing volumetric gas cloud lit by a pulsing core, with light scattering and bloom. A pulsar's beams sweep in time with the bar, and drops set off a supernova.
 * **Neon Grid**: a synthwave night drive under neon gates, past low-poly mountains and a city skyline, towards a striped sun. The mountains are built from the music:
@@ -37,7 +37,7 @@ And it fits around you:
 
 | Key | Action |
 |---|---|
-| `â†` `â†’` | Previous / next visualiser (with a random transition: crossfade, glitch cut, zoom-through, iris or pixel dissolve) |
+| `←` `→` | Previous / next visualiser (with a random transition: crossfade, glitch cut, zoom-through, iris or pixel dissolve) |
 | `C` | Auto-cycle: a new visualiser with each song (or every 4 minutes without track info) |
 | `F`, `Alt+Enter`, double-click | Toggle fullscreen |
 | `N` | Next look (Nebula: palette + gas shape; Neon Grid / Aurora: colour scheme; Liquid: preset; Oscilloscope: mode; Galaxy: shape + colours; Fractal flights: world) |
@@ -49,19 +49,31 @@ And it fits around you:
 | `R` | Record to MP4 (press again to stop and save) |
 | `I` / `S` | Instant replay on / off (keeps the last 30 s ready) / save the last 30 s |
 | `V` | Choose the folder videos are saved to |
-| `W` | Multiple monitors: one monitor â†’ a different visualiser on each â†’ one spanning all |
+| `W` | Multiple monitors: one monitor → a different visualiser on each → one spanning all |
 | `G` | Fullscreen on the next monitor |
 | `K` | Mood colour on / off |
-| `O` | Stream mode: clean (no on-screen text, 1920Ã—1080 window) â†’ EQ bars on green â†’ off |
+| `O` | Stream mode: clean (no on-screen text, 1920×1080 window) → EQ bars on green → off |
 | `A` | Album-art colours on / off |
 | `T` | Track titles on / off |
-| `D` | Cycle audio device: system default â†’ each output â†’ â€¦ |
+| `D` | Cycle audio device: system default → each output → … |
 | `F1` | Stats: fps, resolution, GPU time, audio device, tempo, level and instrument meters |
+| `U` | Check for updates, or restart into one that's been downloaded |
 | `H` | Help |
 | `Esc` | Leave fullscreen, or quit |
 
 Window position, fullscreen, the monitor setup, the last visualiser, the audio device and the B/A/T/C/I/K toggles
 are remembered in `%APPDATA%\Visualizer\settings.ini` (delete it to reset).
+
+## Updates
+
+The app keeps itself up to date from this repository's GitHub releases. At start-up (at most once a day) it checks
+for a newer release in the background. If there is one, it downloads the new `Visualizer.exe` next to the current one
+and checks it against the release's SHA-256 checksum; only a matching download is kept, and it's checked again
+just before it's used. When you close the app the new version takes over, so it starts next time; press `U` to
+restart into it straight away (or to check right now). Nothing changes while it's running.
+
+To turn updates off, set `AutoUpdate=0` in `%APPDATA%\Visualizer\settings.ini`. The app has to be able to write to its
+own folder (e.g. not inside Program Files) to update itself; otherwise it says so.
 
 ## Recording
 
@@ -74,7 +86,7 @@ visuals and the EQ bars are.
 * `R` starts a recording; press it again to stop and save it.
 * `I` turns on **instant replay**: the last 30 seconds are always kept (in `%TEMP%\Visualizer`), and `S` saves them.
   It's off until you turn it on, and remembered.
-* Recordings are up to 2560Ã—1440 at 60 fps (bigger windows are scaled down). The frames are converted to the encoder's
+* Recordings are up to 2560×1440 at 60 fps (bigger windows are scaled down). The frames are converted to the encoder's
   format on the GPU and encoded by the GPU's video encoder where there is one, so it costs about 20% of one CPU core
   while recording or buffering.
 
@@ -88,7 +100,7 @@ single-monitor fullscreen to the next monitor. The EQ bars and on-screen text st
 ## Stream mode
 
 `O` cycles stream mode, for capturing in OBS (window capture works best):
-* **Clean:** no on-screen text at all, and the window becomes exactly 1920Ã—1080 (when not fullscreen).
+* **Clean:** no on-screen text at all, and the window becomes exactly 1920×1080 (when not fullscreen).
 * **EQ bars on green:** only the equaliser bars, over pure green for a chroma-key filter: overlay them on your stream.
 * **Off.** The title bar shows which mode is on.
 
@@ -116,18 +128,18 @@ Press `D` until the device your music plays on is selected.
 * **Tempo and phase.** A 100 Hz onset envelope (spectral flux pooled over 40 log-spaced bands, like a mel onset
   strength) is autocorrelated over 5 s to find the beat period. A comb filter finds where the beats fall, and a
   phase-locked oscillator predicts them, compensating for the ~20 ms it takes to detect an onset.
-  Synthetic tests: predicted beats land within 6â€“19 ms of the kicks at 120â€“140 BPM; 174 BPM DnB locks at half-time (87).
+  Synthetic tests: predicted beats land within 6–19 ms of the kicks at 120–140 BPM; 174 BPM DnB locks at half-time (87).
 * **Confidence** comes from phase consistency (a real beat keeps agreeing with itself), scaled down when there are no
   drums. Visuals only follow the grid above ~0.4. `F1` shows BPM and confidence; the lower beat lamp flashes on the
   predicted beat.
-* **Tempo sets the pace.** Every scene animates faster for faster songs and slower for slow ones: Ã—1 at
-  120 BPM, about Ã—0.75 at 85 and Ã—1.3 at 170 (clamped to 0.7â€“1.4). When the grid locks at half-time (drum & bass
+* **Tempo sets the pace.** Every scene animates faster for faster songs and slower for slow ones: ×1 at
+  120 BPM, about ×0.75 at 85 and ×1.3 at 170 (clamped to 0.7–1.4). When the grid locks at half-time (drum & bass
   counted at 87), the rate of heard hits reveals the real tempo. `F1` shows the factor next to the BPM.
 * **Drums present** (`percussive`): drum hits make many frequency bands jump at once, while tonal notes light up a few.
 * **Instruments** (lightweight DSP, no machine learning): the kick is the low onset beat; a **snare/clap** is the
-  150â€“350 Hz body and the 1.5â€“5 kHz snap jumping together; a **hi-hat** is a jump in 7â€“16 kHz on its own. Each band
-  has its own adaptive threshold and must be audible in the mix. **Voice vs pad**: how tonal the 300â€“3400 Hz range
-  is and whether its loudness pulses at syllable rate (3â€“8 Hz). Drums are reliable; voice vs synth is rough
+  150–350 Hz body and the 1.5–5 kHz snap jumping together; a **hi-hat** is a jump in 7–16 kHz on its own. Each band
+  has its own adaptive threshold and must be audible in the mix. **Voice vs pad**: how tonal the 300–3400 Hz range
+  is and whether its loudness pulses at syllable rate (3–8 Hz). Drums are reliable; voice vs synth is rough
   (distorted vocals barely register). Hi-hats drive the sparkle in every scene; snares send smaller ripples and rings;
   vocals brighten the light; pads add drift.
 * **Key, chords and mood:** a pitch-class profile (chroma, from spectral peaks) is matched against the
@@ -144,14 +156,14 @@ Press `D` until the device your music plays on is selected.
 The analyzer was checked against real recordings (thrash, boom-bap, techno, electronic, electro/dubstep and solo piano)
 with the tools in [`tools/analysis`](tools/analysis/README.md). They replay a recording through the real analyzer and
 score it against an offline reference beat tracker. Tempo matched the reference within 0.5 BPM on every song with a beat
-(except a 1% drift on one electro track). Beat placement is excellent on steady grooves (F â‰ˆ 0.9 on hip-hop and
+(except a 1% drift on one electro track). Beat placement is excellent on steady grooves (F ≈ 0.9 on hip-hop and
 electronic) and weaker on thrash metal and syncopated techno, where confidence stays honestly low so visuals don't
 lock onto a shaky grid. Trust builds faster than it falls, so the grid locks sooner after a beatless intro (mean grid
-F 0.43 â†’ 0.47; the electro track locks 6 s sooner).
+F 0.43 → 0.47; the electro track locks 6 s sooner).
 
 ## Performance
 
-Measured on an RTX 3080 at 2560Ã—1440 fullscreen:
+Measured on an RTX 3080 at 2560×1440 fullscreen:
 
 * Nebula: about 1.65 ms GPU per frame. It renders at 50% resolution with temporal accumulation (TAA): each frame is
   jittered and blended with the reprojected previous result, which removes raymarch grain and recovers sub-pixel
@@ -162,7 +174,7 @@ Measured on an RTX 3080 at 2560Ã—1440 fullscreen:
 * Aurora: about 1.2 ms GPU per frame (60% resolution).
 * Galaxy: about 0.75 ms GPU per frame for a million particles at full resolution. Each star works out its own orbit in
   the vertex shader, so there are no particle buffers or simulation; the smooth galaxy light is drawn analytically.
-* Fractal flights: about 0.3â€“1.3 ms GPU per frame depending on the world (50% resolution).
+* Fractal flights: about 0.3–1.3 ms GPU per frame depending on the world (50% resolution).
 * Spectrum: 0.01 ms GPU per frame.
 * CPU: under 1% of one core in a window, about 3.5% fullscreen with the stats overlay; about 20% more while
   recording or buffering instant replay.
@@ -180,7 +192,7 @@ How it stays light:
 Requires Visual Studio 2022+ with **Desktop development with C++**, which includes CMake, Ninja, the Windows SDK and `fxc`.
 
 ```powershell
-.\build.ps1                 # Release â†’ bin\Visualizer.exe
+.\build.ps1                 # Release → bin\Visualizer.exe
 .\build.ps1 -Run            # build and launch
 .\build.ps1 -Test           # build and run the audio-analysis tests
 .\build.ps1 -Config Debug   # bin\Visualizer-debug.exe (D3D debug layer if installed)
@@ -193,6 +205,9 @@ Dev tools:
 * `build\Release\vis_record.exe` records what's playing, one WAV per song (git-ignored), and `vis_replay.exe` plus
   `tools\analysis\analyze.py` score the analyzer on those recordings. See [tools/analysis](tools/analysis/README.md).
 * `build\Release\capture_probe.exe [seconds]` prints what the loopback capture receives.
+* `tools\release.ps1 -Notes notes.md` publishes a release (after bumping the version in `CMakeLists.txt` and
+  `res\app.rc`): clean build and tests, then the exe, a zip and the `Visualizer.exe.sha256` checksum the updater needs.
+* `VISUALIZER_PRETEND_VERSION=1.0.0` makes the app act as an older build, to try the updater against the latest release.
 * `build\Release\vis_mp4check.exe clip.mp4` checks a recorded video's audio for dropouts and timestamp gaps (record a steady tone).
 * `VISUALIZER_GPU_BUDGET_MS=0.1` (environment variable) forces adaptive resolution to kick in.
 * `VISUALIZER_TAA=0` turns off the Nebula's temporal accumulation, and `VISUALIZER_SEED=<n>` makes its look and
@@ -206,15 +221,16 @@ Dev tools:
 src/
   main.cpp                  window + loop + keys; RegisterVisualizers() is the list of visualisers
   platform/                 Window (borderless fullscreen), FrameLimiter, Settings
-  audio/AudioCapture        WASAPI loopback thread â†’ lock-free ring buffer; device selection
-  audio/AudioAnalyzer       FFT â†’ 64 log bands, auto-gain, smoothing, onset beats, instruments, key/chords/mood,
-                            build-ups/drops, waveform â†’ AudioFeatures
+  audio/AudioCapture        WASAPI loopback thread → lock-free ring buffer; device selection
+  audio/AudioAnalyzer       FFT → 64 log bands, auto-gain, smoothing, onset beats, instruments, key/chords/mood,
+                            build-ups/drops, waveform → AudioFeatures
   audio/BeatTracker         tempo + beat phase: onset envelope, autocorrelation, comb filter, phase-locked oscillator
   media/NowPlaying          Windows media sessions (C++/WinRT): title, artist, album art
-  media/TrackPalette        album art â†’ deep / mid / hot palette
+  media/TrackPalette        album art → deep / mid / hot palette
   render/Renderer           D3D11 device, flip-model swap chain, composite pass, Direct2D overlay target
   render/GpuTimer           non-blocking GPU timestamp queries
   capture/Recorder          MP4 recording + instant replay: GPU NV12 conversion, Media Foundation encoder thread, segment joining
+  update/Updater            auto-update from GitHub releases: WinHTTP, SHA-256 check, swap on exit
   viz/Visualizer.h          the plug-in interface (IVisualizer)
   viz/VisualizerHost        offscreen targets, crossfades, adaptive resolution, one region per monitor
   viz/nebula/, viz/neongrid/, viz/feedback/, viz/scope/, viz/aurora/, viz/galaxy/, viz/fractal/, viz/spectrum/
@@ -235,15 +251,15 @@ Per frame:
 
 1. Create `src/viz/<name>/<Name>Visualizer.{h,cpp}` implementing `IVisualizer` (see `SpectrumVisualizer` for the minimum):
    * `CreateResources` / `ReleaseResources`: create your shaders and buffers (also called again after GPU device loss).
-   * `Update(audio, dt)`: animate from `AudioFeatures` (all values 0â€“1).
+   * `Update(audio, dt)`: animate from `AudioFeatures` (all values 0–1).
    * `Render(renderer, time, dt)`: bind your resources (slots `b2+`, `t0+`, `s0+` are free) and call `renderer.DrawFullscreen(ps)`.
    * Optionally: `RenderScale()` (e.g. `0.5` for soft looks), `OnKey`, `TakeMessage`, `Status`,
      `AccentColours` (tints the EQ bars), `SetTrackPalette` (album colours, song changes).
    * Multi-pass effects can render into their own textures and restore `renderer.BoundTarget()`
      (see `FeedbackVisualizer`).
 2. Add the shader to `CMakeLists.txt` with `compile_shader(...)` and the `.cpp` to the executable sources.
-3. Register it in `RegisterVisualizers()` in `main.cpp`. Registration order is the `â†`/`â†’` order.
+3. Register it in `RegisterVisualizers()` in `main.cpp`. Registration order is the `←`/`→` order.
 
 Every shader can read `iTime`, `iResolution` (b0) and the audio features (b1) from `shaders/common.hlsli`:
 `aBands`, `aLevel`, `aIntensity`, `aBeat`, `aTempo` (bpm, beat phase, bar phase, confidence),
-`aStructure` (build-up, drop, â€¦), `Spectrum(i)` / `SpectrumAt(x)` and `Waveform(i)` / `WaveformAt(x)`.
+`aStructure` (build-up, drop, …), `Spectrum(i)` / `SpectrumAt(x)` and `Waveform(i)` / `WaveformAt(x)`.

@@ -24,6 +24,7 @@ const wchar_t* const kHelpLines[][2] = {
     { L"R", L"Record to MP4 (again to stop and save)" },
     { L"I  /  S", L"Instant replay on / off  /  save last 30 s" },
     { L"V", L"Choose where videos are saved" },
+    { L"U", L"Check for updates  /  install a downloaded one" },
     { L"F1", L"Stats" },
     { L"H", L"This help" },
     { L"Esc", L"Leave fullscreen / quit" },
@@ -211,7 +212,7 @@ void Overlay::DrawStats(ID2D1DeviceContext* ctx, const OverlayStats& s, const Au
 }
 
 void Overlay::DrawHelp(ID2D1DeviceContext* ctx, float width, float height) {
-    const float rowH = 40.0f;
+    const float rowH = 36.0f;
     const float panelW = 800.0f;
     const float panelH = 110.0f + rowH * ARRAYSIZE(kHelpLines);
     const D2D1_RECT_F panel = D2D1::RectF((width - panelW) / 2, (height - panelH) / 2,

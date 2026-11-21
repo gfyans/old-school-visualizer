@@ -95,13 +95,15 @@ add_executable(Visualizer WIN32
     src/viz/galaxy/GalaxyVisualizer.cpp
     src/viz/fractal/FractalVisualizer.cpp
     src/capture/Recorder.cpp
+    src/update/Updater.cpp
     src/media/NowPlaying.cpp
     res/app.rc
     ${SHADER_HEADERS})
 set_source_files_properties(res/app.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/res/app.ico)
 
 target_include_directories(Visualizer PRIVATE src ${SHADER_OUT})
-target_link_libraries(Visualizer PRIVATE audio_analysis d3d11 dxgi d2d1 dwrite ole32 shell32 windowsapp mfplat mfreadwrite mfuuid)
+target_link_libraries(Visualizer PRIVATE audio_analysis d3d11 dxgi d2d1 dwrite ole32 shell32 windowsapp mfplat mfreadwrite mfuuid winhttp bcrypt)
+target_compile_definitions(Visualizer PRIVATE VISUALIZER_VERSION="${PROJECT_VERSION}")
 set_source_files_properties(src/media/NowPlaying.cpp PROPERTIES COMPILE_OPTIONS /bigobj)   # C++/WinRT
 target_compile_definitions(Visualizer PRIVATE ${COMMON_DEFS})
 target_compile_options(Visualizer PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_OPTS}>)
