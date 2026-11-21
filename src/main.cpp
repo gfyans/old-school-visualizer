@@ -14,6 +14,7 @@
 #include "viz/scope/ScopeVisualizer.h"
 #include "viz/aurora/AuroraVisualizer.h"
 #include "viz/galaxy/GalaxyVisualizer.h"
+#include "viz/fractal/FractalVisualizer.h"
 #include "viz/spectrum/SpectrumVisualizer.h"
 
 #include <algorithm>
@@ -34,6 +35,7 @@ void RegisterVisualizers(VisualizerHost& host) {
     host.Add(std::make_unique<ScopeVisualizer>());
     host.Add(std::make_unique<AuroraVisualizer>());
     host.Add(std::make_unique<GalaxyVisualizer>());
+    host.Add(std::make_unique<FractalVisualizer>());
     host.Add(std::make_unique<SpectrumVisualizer>());
 }
 
