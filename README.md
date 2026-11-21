@@ -8,6 +8,13 @@ It listens to whatever your PC is playing (Spotify, a browser, games…) and ren
   each row of terrain is one moment's spectrum, entering at the horizon.
 * **Liquid**: Milkdrop-style feedback. Waveform ink is warped, faded and hue-shifted every frame into
   tunnels, vortices, ripples and kaleidoscopes.
+* **Oscilloscope**: a vector display on an old CRT. The real waveform drives an electron beam with phosphor
+  afterglow, behind curved glass. Modes: triggered waveform, X/Y vectorscope (the stereo field), dual trace and polar.
+* **Aurora**: soft ribbons of northern lights sweeping over a frozen forest lake, mirrored in the cracked ice. The calm one.
+* **Galaxy**: about a million stars swirling around a black hole, with gravitational lensing. A camera director
+  changes shots on the downbeat, and drops make the black hole fire a quasar.
+* **Fractal flights**: fly down a winding tunnel through infinite raymarched fractals: Menger halls, a Mandelbox,
+  Apollonian foam, coral and a cathedral, with rings and bands of light on the beat and hyperspeed on drops.
 * **Spectrum**: classic bar spectrum.
 
 It also understands the music beyond loudness:
@@ -23,8 +30,10 @@ It also understands the music beyond loudness:
 | `←` `→` | Previous / next visualiser (with a random transition: crossfade, glitch cut, zoom-through, iris or pixel dissolve) |
 | `C` | Auto-cycle: a new visualiser with each song (or every 4 minutes without track info) |
 | `F`, `Alt+Enter`, double-click | Toggle fullscreen |
-| `N` | Next look (Nebula: palette + gas shape; Neon Grid: colour scheme; Liquid: preset) |
+| `N` | Next look (Nebula: palette + gas shape; Neon Grid / Aurora: colour scheme; Liquid: preset; Oscilloscope: mode; Galaxy: shape + colours; Fractal flights: world) |
 | `Space` | Lock / unlock the current look |
+| `M` | Galaxy: next camera shot |
+| `Q` | Galaxy: fire the quasar. Fractal flights: hyperspeed (both as on a drop) |
 | `B` | Cyberpunk equaliser bars along the bottom (neon LED segments, glitch tears on hard hits) |
 | `A` | Album-art colours on / off |
 | `T` | Track titles on / off |
@@ -87,6 +96,11 @@ Measured on an RTX 3080 at 2560×1440 fullscreen:
   detail, so it looks the same as 60% did at about 30% less cost.
 * Neon Grid: about 1.7 ms GPU per frame (75% resolution, for crisp lines).
 * Liquid: about 0.06 ms GPU per frame.
+* Oscilloscope: about 0.2 ms GPU per frame (full resolution, for thin beams).
+* Aurora: about 1.2 ms GPU per frame (60% resolution).
+* Galaxy: about 0.75 ms GPU per frame for a million particles at full resolution. Each star works out its own orbit in
+  the vertex shader, so there are no particle buffers or simulation; the smooth galaxy light is drawn analytically.
+* Fractal flights: about 0.3–1.3 ms GPU per frame depending on the world (50% resolution).
 * Spectrum: 0.01 ms GPU per frame.
 * CPU: under 1% of one core in a window, about 3.5% fullscreen with the stats overlay.
 
@@ -136,7 +150,7 @@ src/
   render/GpuTimer           non-blocking GPU timestamp queries
   viz/Visualizer.h          the plug-in interface (IVisualizer)
   viz/VisualizerHost        offscreen targets, crossfades, adaptive resolution
-  viz/nebula/, viz/neongrid/, viz/feedback/, viz/spectrum/
+  viz/nebula/, viz/neongrid/, viz/feedback/, viz/scope/, viz/aurora/, viz/galaxy/, viz/fractal/, viz/spectrum/
   ui/Overlay                messages, now-playing caption, F1 stats, H help (DirectWrite)
   ui/EqBars                 optional equaliser bars drawn over any visualiser
 shaders/                    HLSL, compiled at build time into headers

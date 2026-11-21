@@ -15,11 +15,12 @@ Ideas for where this could go, roughly in order of impact. ✅ = done.
 
 ## 2. More visualisers
 - ✅ **Milkdrop-style feedback** ("Liquid"). Each frame warps and fades the previous one: infinite tunnels and liquid trails.
-- **Particle galaxy.** About a million GPU particles around a black hole; bass drives gravity, beats fling out spiral arms.
-- **Oscilloscope / vector display.** Phosphor-green waveform on a CRT, with scanlines and bloom.
-- **Fractal flights.** Raymarched Mandelbulbs / kaleidoscopic fractals that breathe with the music.
+- ✅ **Particle galaxy** ("Galaxy"). A million GPU particles around a black hole with lensing; bass drives gravity, beats send shockwaves through the arms, a camera director cuts on downbeats, drops fire a quasar.
+- ✅ **Oscilloscope / vector display.** The real waveform on a CRT: phosphor afterglow, curved glass, four modes including an X/Y vectorscope.
+- ✅ **Fractal flights.** Flying through five infinite raymarched fractal worlds that breathe with the music; hyperspeed on drops.
 - ✅ **Synthwave terrain** ("Neon Grid"). Neon grid landscape whose mountains are the scrolling spectrum history.
-- **Aurora.** Curtains of light rippling to the mids over a silhouetted landscape.
+- ✅ **Aurora.** Soft ribbons of northern lights over a frozen forest lake, reflected in the ice.
+- **More worlds for Fractal flights.** A Mandelbulb set piece and a working Kleinian cave world.
 
 ## 3. Nebula upgrades
 - ✅ **Temporal accumulation (TAA-style).** Reproject and blend previous frames to remove grain: sharper *and* cheaper.
