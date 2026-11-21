@@ -3,7 +3,7 @@
 #include <random>
 #include "viz/Visualizer.h"
 
-// "Aurora": folded curtains of light over a mountain lake at night. The calm one.
+// "Aurora": soft ribbons of northern lights over a frozen forest lake at night. The calm one.
 //
 //   mids        -> curtains sway and fold
 //   beat (grid) -> a flare travels along the curtains

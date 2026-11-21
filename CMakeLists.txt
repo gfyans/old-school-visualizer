@@ -51,6 +51,9 @@ compile_shader(scope_beam_ps.hlsl    ps_5_0 g_scope_beam_ps)
 compile_shader(scope_decay_ps.hlsl   ps_5_0 g_scope_decay_ps)
 compile_shader(scope_crt_ps.hlsl     ps_5_0 g_scope_crt_ps)
 compile_shader(aurora_ps.hlsl        ps_5_0 g_aurora_ps)
+compile_shader(galaxy_vs.hlsl        vs_5_0 g_galaxy_vs)
+compile_shader(galaxy_ps.hlsl        ps_5_0 g_galaxy_ps)
+compile_shader(galaxy_out_ps.hlsl    ps_5_0 g_galaxy_out_ps)
 
 # ---------------------------------------------------------------------------
 # Audio analysis (pure C++, shared with tests)
@@ -80,6 +83,7 @@ add_executable(Visualizer WIN32
     src/viz/neongrid/NeonGridVisualizer.cpp
     src/viz/scope/ScopeVisualizer.cpp
     src/viz/aurora/AuroraVisualizer.cpp
+    src/viz/galaxy/GalaxyVisualizer.cpp
     src/media/NowPlaying.cpp
     res/app.rc
     ${SHADER_HEADERS})

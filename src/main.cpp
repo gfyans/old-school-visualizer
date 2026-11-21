@@ -13,6 +13,7 @@
 #include "viz/neongrid/NeonGridVisualizer.h"
 #include "viz/scope/ScopeVisualizer.h"
 #include "viz/aurora/AuroraVisualizer.h"
+#include "viz/galaxy/GalaxyVisualizer.h"
 #include "viz/spectrum/SpectrumVisualizer.h"
 
 #include <algorithm>
@@ -32,6 +33,7 @@ void RegisterVisualizers(VisualizerHost& host) {
     host.Add(std::make_unique<FeedbackVisualizer>());
     host.Add(std::make_unique<ScopeVisualizer>());
     host.Add(std::make_unique<AuroraVisualizer>());
+    host.Add(std::make_unique<GalaxyVisualizer>());
     host.Add(std::make_unique<SpectrumVisualizer>());
 }
 
