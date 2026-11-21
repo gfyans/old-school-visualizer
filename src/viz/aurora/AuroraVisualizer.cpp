@@ -15,10 +15,13 @@ struct AuroraConstants {   // matches cbuffer Aurora in aurora_ps.hlsl
     float skyTop[3];     float stars;
     float skyHorizon[3]; float ripple;
     float land[3];       float yaw;
-    float pitch, pad0, pad1, pad2;
+    float pitch, skyRot, corona, meteorAge;
+    float meteorStart[4];
+    float meteorDir[4];
+    float kick, trail, milky, pad0;
 };
 static_assert(sizeof(AuroraConstants) % 16 == 0);
-static_assert(sizeof(AuroraConstants) <= sizeof(float) * 28);
+static_assert(sizeof(AuroraConstants) <= sizeof(float) * 40);
 
 struct NamedScheme { const wchar_t* name; AuroraVisualizer::Scheme s; };
 // low curtain colour, high curtain colour, sky top, sky horizon, land
@@ -88,8 +91,36 @@ void AuroraVisualizer::NextScheme(float blendSeconds) {
     m_changePending = false;
 }
 
+// A shooting star somewhere in the view, heading mostly downward.
+void AuroraVisualizer::ShootingStar() {
+    std::uniform_real_distribution<float> u(0.0f, 1.0f);
+    const float az = -0.75f + 1.5f * u(m_rng), el = 0.3f + 0.45f * u(m_rng);
+    const float s[3] = { std::sin(az) * std::cos(el), std::sin(el), std::cos(az) * std::cos(el) };
+    // Direction of travel: down and to one side, made perpendicular to the start.
+    float d[3] = { (u(m_rng) - 0.5f) * 1.6f, -1.0f, (u(m_rng) - 0.5f) * 0.3f };
+    const float along = d[0] * s[0] + d[1] * s[1] + d[2] * s[2];
+    for (int i = 0; i < 3; ++i) d[i] -= along * s[i];
+    const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    for (int i = 0; i < 3; ++i) { m_meteorStart[i] = s[i]; m_meteorDir[i] = d[i] / len; }
+    m_meteorStart[3] = 0.1f + 0.08f * u(m_rng);   // tail length
+    m_meteorDir[3] = 0.45f + 0.3f * u(m_rng);     // speed
+    m_meteorAge = 0.0f;
+}
+
 void AuroraVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_time += dt;
+    // The sky turns like a time-lapse (faster when the song is big), and shooting stars come and go.
+    m_skyRot += dt * audio.tempoFactor * (0.012f + 0.02f * audio.intensity);
+    if (m_meteorAge >= 0.0f) { m_meteorAge += dt; if (m_meteorAge > 0.9f) m_meteorAge = -1.0f; }
+    if (audio.snareCount != m_lastSnare) {
+        m_lastSnare = audio.snareCount;
+        if (!audio.silent && m_meteorAge < 0.0f && std::uniform_real_distribution<float>(0.0f, 1.0f)(m_rng) < 0.35f) ShootingStar();
+    }
+    if (audio.beatCount != m_lastKick) {
+        m_lastKick = audio.beatCount;
+        if (!audio.silent) m_kick = std::max(m_kick, std::min(1.0f, 0.4f + 0.8f * audio.bass));
+    }
+    m_kick *= std::exp(-dt / 0.25f);
     m_mids = Smooth(m_mids, 0.5f * (audio.lowMid + audio.highMid), dt, 0.3f, 1.0f);
     m_bass = Smooth(m_bass, audio.bass, dt, 0.08f, 0.5f);
     m_treble = Smooth(m_treble, std::max(audio.treble * 0.6f, audio.hat), dt, 0.05f, 0.4f);
@@ -115,9 +146,12 @@ void AuroraVisualizer::Update(const AudioFeatures& audio, float dt) {
     if (audio.dropCount != m_lastDrop) {
         m_lastDrop = audio.dropCount;
         m_surge = 1.0f;
+        ShootingStar();
         if (!m_locked && m_timeSinceChange > 4.0f) NextScheme(2.0f);
     }
     m_surge *= std::exp(-dt / 1.2f);
+    // The corona: streams faintly as a build-up rises, bursts on a drop and lingers a few seconds.
+    m_corona = Smooth(m_corona, std::max(1.3f * m_surge, 0.45f * m_buildUp * m_buildUp), dt, 0.15f, 1.5f);
     if (m_beatsSinceChange >= 64 && m_timeSinceChange > 40.0f) m_changePending = true;   // slower than the others: calm
     const bool onDownbeat = audio.barPhase < m_lastBarPhase;
     m_lastBarPhase = audio.barPhase;
@@ -127,7 +161,7 @@ void AuroraVisualizer::Update(const AudioFeatures& audio, float dt) {
     // Slow, smooth drivers: auroras move gracefully even when the music doesn't.
     const float speed = audio.silent ? 0.35f : 0.5f + 1.2f * m_mids + 0.8f * m_buildUp;
     m_anim += dt * speed * audio.tempoFactor;   // faster songs animate faster
-    const float targetBright = audio.silent ? 0.45f : 0.55f + 0.5f * audio.intensity + 0.35f * m_bass + 0.4f * m_buildUp + 0.8f * m_surge + 0.35f * audio.vocal;
+    const float targetBright = audio.silent ? 0.55f : 0.75f + 0.5f * audio.intensity + 0.35f * m_bass + 0.4f * m_buildUp + 0.8f * m_surge + 0.35f * audio.vocal;
     m_brightness = Smooth(m_brightness, targetBright, dt, 0.25f, 1.2f);
     m_sway = Smooth(m_sway, 0.8f + 0.7f * m_mids + 0.3f * audio.pad, dt, 1.0f, 2.0f);
     m_height = Smooth(m_height, 1.0f + 0.5f * m_buildUp + 0.25f * m_surge, dt, 0.8f, 1.5f);
@@ -145,6 +179,14 @@ void AuroraVisualizer::Update(const AudioFeatures& audio, float dt) {
     c.ripple = m_ripple;
     c.yaw = 0.09f * std::sin(m_time * 0.021f);   // a slow look around
     c.pitch = 0.32f;
+    c.skyRot = std::fmod(m_skyRot, 6.2831853f);
+    c.corona = m_corona;
+    c.meteorAge = m_meteorAge;
+    memcpy(c.meteorStart, m_meteorStart, sizeof(c.meteorStart));
+    memcpy(c.meteorDir, m_meteorDir, sizeof(c.meteorDir));
+    c.kick = m_kick;
+    c.trail = 0.26f;     // the long exposure: each star draws about 15 degrees of arc
+    c.milky = 1.0f;
     Copy3(c.low, s.low);
     Copy3(c.high, s.high);
     Copy3(c.skyTop, s.skyTop);

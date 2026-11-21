@@ -3,14 +3,16 @@
 #include <random>
 #include "viz/Visualizer.h"
 
-// "Aurora": soft ribbons of northern lights over a frozen forest lake at night. The calm one.
+// "Aurora": ribbons of northern lights over a frozen forest lake at night, under a sky that turns like a
+// long-exposure photograph (star trails round the pole, the Milky Way wheeling across).
 //
 //   mids        -> curtains sway and fold
-//   beat (grid) -> a flare travels along the curtains
+//   beat (grid) -> a flare travels along the curtains; kicks light their lower edge
 //   bass        -> brighter curtains, ripples on the lake
-//   treble      -> stars twinkle
-//   build-up    -> curtains climb higher and brighten
-//   drop        -> a surge of light and a new colour scheme
+//   snare       -> now and then a shooting star
+//   treble      -> brighter stars
+//   build-up    -> curtains climb higher and brighten; a corona of rays starts to stream overhead
+//   drop (or Q) -> a surge of light, a burst of corona rays, a shooting star and a new colour scheme
 //   silence     -> a slow, dim drift
 class AuroraVisualizer : public IVisualizer {
 public:
@@ -52,11 +54,14 @@ private:
     float m_brightness = 0.6f, m_sway = 1.0f, m_height = 1.0f, m_ripple = 0.3f;
     float m_flare = 0.0f, m_flareX = 0.0f, m_flareSpeed = 8.0f, m_surge = 0.0f;
     float m_mids = 0.0f, m_bass = 0.0f, m_treble = 0.0f, m_buildUp = 0.0f;
-    uint32_t m_lastBeat = 0, m_lastGrid = 0, m_lastDrop = 0;
+    float m_skyRot = 0.0f, m_corona = 0.0f, m_kick = 0.0f;
+    float m_meteorAge = -1.0f, m_meteorStart[4] = {}, m_meteorDir[4] = {};
+    void ShootingStar();
+    uint32_t m_lastBeat = 0, m_lastGrid = 0, m_lastDrop = 0, m_lastSnare = 0, m_lastKick = 0;
     int m_beatsSinceChange = 0;
     float m_timeSinceChange = 0.0f, m_lastBarPhase = 0.0f;
     bool m_changePending = false;
 
-    float m_constants[28] = {};
+    float m_constants[40] = {};
     std::wstring m_message;
 };

@@ -13,7 +13,10 @@ It listens to whatever your PC is playing (Spotify, a browser, games…) and ren
 * **Oscilloscope**: a vector display filling the screen like the glass of an old CRT. The real waveform drives an
   electron beam with phosphor afterglow over a neon graticule that bulges like the tube's face and swells on the
   beat. Modes: triggered waveform, X/Y vectorscope (the stereo field), dual trace and polar.
-* **Aurora**: soft ribbons of northern lights sweeping over a frozen forest lake, mirrored in the cracked ice. The calm one.
+* **Aurora**: ribbons of northern lights sweeping over a frozen forest lake, mirrored in the cracked ice, under a
+  sky that turns like a long-exposure photograph: star trails wheel round the pole and the Milky Way arcs across.
+  Kicks light the curtains' lower edge, snares send shooting stars, build-ups start a corona of rays streaming
+  overhead and drops burst it.
 * **Galaxy**: about a million stars swirling around a black hole, with gravitational lensing. A camera director
   changes shots on the downbeat, and drops make the black hole fire a quasar.
 * **Fractal flights**: fly down a winding tunnel through infinite raymarched fractals: Menger halls, a Mandelbox,
@@ -58,7 +61,7 @@ there's nothing to remember. `H` shows the few keys worth knowing plus the curre
 | Right-click | The menu: visualiser, scene changes, the visualiser's own actions, effects, display, audio device, recording |
 | `←` `→` | Previous / next visualiser (with a random transition: crossfade, glitch cut, zoom-through, iris or pixel dissolve) |
 | `C` | Scene changes: off → a new visualiser with each song (or every 4 minutes without track info) → **Random**: a random visualiser and look about every minute, switched at the start of a phrase or on a drop, never in the middle of a blast, supernova or quasar |
-| `F`, `Alt+Enter`, double-click | Toggle fullscreen |
+| `F`, `Alt+Enter`, double-click | Toggle fullscreen (fullscreen keeps the monitor on: no screensaver or display sleep) |
 | `N` | Next look (Nebula: palette + gas shape; Neon Grid / Aurora: colour scheme; Liquid: Ink / Neon / Chrome; Oscilloscope: mode; Galaxy: shape + colours; Fractal flights: world; Signal: subject, style + palette; Detonation: Night / Ink / Dusk; Spectrum: Studio / Radial) |
 | `Space` | Lock / unlock the current look |
 | `M` | Galaxy, Detonation and Spectrum's Studio: next camera shot. Signal: centre / grid. Spectrum's Radial and Liquid: colours |

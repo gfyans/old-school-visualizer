@@ -178,7 +178,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     uint32_t seenRandomDrop = 0;
     std::mt19937 rng(std::random_device{}());
     int recent[2] = { -1, -1 };   // the last visualisers Random showed, not to repeat straight away
-    auto announce = [&] { overlay.ShowMessage(host.Active().Name()); sinceSwitch = 0.0f; barsSinceSwitch = 0; };
+    // A new visualiser: no name on screen (it's in the menu and F1), just restart the scene timers.
+    auto announce = [&] { sinceSwitch = 0.0f; barsSinceSwitch = 0; };
     auto randomScene = [&] {
         std::vector<int> pool;
         for (int i = 0; i < host.Count(); ++i)
@@ -234,7 +235,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         }
         host.SetRegions(regions);
     };
+    // Fullscreen keeps the display on (no screensaver or monitor sleep); windowed, Windows decides.
+    auto keepDisplayOn = [](bool on) {
+        SetThreadExecutionState(on ? ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED : ES_CONTINUOUS);
+    };
+    keepDisplayOn(window.IsFullscreen());
     window.onFullscreenChanged = [&](bool fullscreen) {
+        keepDisplayOn(fullscreen);
         if (!fullscreen) host.SetRegions({});
         else if (displayMode == 1) {   // regions follow the (new) window: re-derive them
             const std::vector<MonitorDesc> monitors = Window::Monitors();
@@ -535,7 +542,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     };
     updateMonitor();
 
-    overlay.ShowMessage(std::wstring(host.Active().Name()) + L"   ·   right-click for the menu, H for help", 4.0f);
+    overlay.ShowMessage(L"Right-click for the menu, H for help", 4.0f);
     if (justUpdated) overlay.ShowMessage(std::wstring(L"Updated to version ") + Updater::CurrentVersion(), 4.0f);
     if (settings.autoUpdate) settings.lastUpdateCheck = updater.Start(settings.lastUpdateCheck, false);
 
