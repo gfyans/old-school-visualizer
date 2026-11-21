@@ -11,6 +11,17 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+
+# Runs a native command, judging it by its exit code: git and gh write normal progress to stderr,
+# which PowerShell would otherwise treat as an error.
+function Invoke-Native([string]$exe, [string[]]$arguments) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $exe @arguments 2>&1 | ForEach-Object { Write-Host $_ }
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $previous
+    if ($code -ne 0) { throw "$exe $($arguments -join ' ') failed ($code)" }
+}
 Set-Location $root
 
 $version = [regex]::Match((Get-Content CMakeLists.txt -Raw), 'project\(Visualizer VERSION (\d+\.\d+\.\d+)').Groups[1].Value
@@ -34,9 +45,9 @@ $hash = (Get-FileHash (Join-Path $out 'Visualizer.exe') -Algorithm SHA256).Hash.
 $sum = Join-Path $out 'Visualizer.exe.sha256'
 [IO.File]::WriteAllText($sum, "$hash  Visualizer.exe`n")
 
-git push origin main
-git tag -a $tag -m "$tag"
-git push origin $tag
+Invoke-Native git @('push', 'origin', 'main')
+Invoke-Native git @('tag', '-a', $tag, '-m', $tag)
+Invoke-Native git @('push', 'origin', $tag)
 if (-not $Title) { $Title = $tag }
-gh release create $tag (Join-Path $out 'Visualizer.exe') $zip $sum --title $Title --notes-file $Notes --verify-tag
+Invoke-Native gh @('release', 'create', $tag, (Join-Path $out 'Visualizer.exe'), $zip, $sum, '--title', $Title, '--notes-file', $Notes, '--verify-tag')
 Write-Host "Released $tag (Visualizer.exe sha256 $hash)"
