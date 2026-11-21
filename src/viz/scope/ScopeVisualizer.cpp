@@ -18,7 +18,7 @@ struct CrtConstants {                                          // matches cbuffe
     float core[3];  float bloom;
     float trail[3]; float curvature;
     float grid[3];  float flicker;
-    float glare, pad0, pad1, pad2;
+    float glare, gridPulse, pad1, pad2;
 };
 
 const wchar_t* const kModeNames[] = { L"Waveform", L"X/Y vectorscope", L"Dual trace", L"Polar" };
@@ -281,9 +281,10 @@ void ScopeVisualizer::Render(Renderer& renderer, float time, float dt) {
     memcpy(crt.trail, ph.trail, sizeof(crt.trail));
     memcpy(crt.grid, ph.grid, sizeof(crt.grid));
     crt.bloom = 0.9f + 0.5f * m_beat;
-    crt.curvature = 0.09f;
+    crt.curvature = 0.045f;   // the grid's bulge
     crt.flicker = 0.015f * std::sin(m_time * 377.0f);   // faint mains-frequency shimmer
     crt.glare = 1.0f;
+    crt.gridPulse = m_beat;   // the neon grid swells a little on the beat
     if (SUCCEEDED(ctx->Map(m_crtCB.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
         memcpy(mapped.pData, &crt, sizeof(crt));
         ctx->Unmap(m_crtCB.Get(), 0);

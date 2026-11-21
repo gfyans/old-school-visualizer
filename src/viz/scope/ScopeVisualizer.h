@@ -4,10 +4,10 @@
 #include <vector>
 #include "viz/Visualizer.h"
 
-// "Oscilloscope": a vector display on an old CRT. The actual audio waveform drives an
+// "Oscilloscope": a vector display filling the screen like the glass of a CRT. The actual audio waveform drives an
 // electron beam drawn as real line segments: brighter where it moves slowly, leaving a
-// white-hot core that fades to a coloured phosphor afterglow. Curved glass, graticule,
-// scanlines and bloom.
+// white-hot core that fades to a coloured phosphor afterglow, over
+// a neon graticule, scanlines and bloom.
 //
 //   modes (N)    -> triggered waveform, X/Y vectorscope (stereo field), dual trace (L/R), polar ring
 //   bass / beat  -> bigger, brighter trace

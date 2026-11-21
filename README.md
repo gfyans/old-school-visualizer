@@ -10,8 +10,9 @@ It listens to whatever your PC is playing (Spotify, a browser, games…) and ren
   as loud as the music; kicks splash it outward into curling vortex pairs, snares drop in a contrasting colour,
   hi-hats feather the edges, build-ups wind everything into a whirlpool and drops flood the screen with a burst
   of new colour. Looks: Ink (pigment billowing in backlit water), Neon (glowing dye) and Chrome (liquid metal).
-* **Oscilloscope**: a vector display on an old CRT. The real waveform drives an electron beam with phosphor
-  afterglow, behind curved glass. Modes: triggered waveform, X/Y vectorscope (the stereo field), dual trace and polar.
+* **Oscilloscope**: a vector display filling the screen like the glass of an old CRT. The real waveform drives an
+  electron beam with phosphor afterglow over a neon graticule that bulges like the tube's face and swells on the
+  beat. Modes: triggered waveform, X/Y vectorscope (the stereo field), dual trace and polar.
 * **Aurora**: soft ribbons of northern lights sweeping over a frozen forest lake, mirrored in the cracked ice. The calm one.
 * **Galaxy**: about a million stars swirling around a black hole, with gravitational lensing. A camera director
   changes shots on the downbeat, and drops make the black hole fire a quasar.
