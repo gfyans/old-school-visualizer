@@ -3,7 +3,7 @@
 A modern take on the Winamp-era music visualiser. A single small `.exe` with no installer and no runtime to install.
 It listens to whatever your PC is playing (Spotify, a browser, games…) and renders it on the GPU.
 
-* **Nebula**: fly through a glowing volumetric gas cloud that reacts to the music.
+* **Nebula**: fly through a glowing volumetric gas cloud lit by a pulsing core, with light scattering and bloom. A pulsar's beams sweep in time with the bar, and drops set off a supernova.
 * **Neon Grid**: a synthwave night drive under neon gates, past low-poly mountains and a city skyline, towards a striped sun. The mountains are built from the music:
   each row of terrain is one moment's spectrum, entering at the horizon.
 * **Liquid**: Milkdrop-style feedback. Waveform ink is warped, faded and hue-shifted every frame into
@@ -33,7 +33,8 @@ It also understands the music beyond loudness:
 | `N` | Next look (Nebula: palette + gas shape; Neon Grid / Aurora: colour scheme; Liquid: preset; Oscilloscope: mode; Galaxy: shape + colours; Fractal flights: world) |
 | `Space` | Lock / unlock the current look |
 | `M` | Galaxy: next camera shot |
-| `Q` | Galaxy: fire the quasar. Fractal flights: hyperspeed (both as on a drop) |
+| `Q` | Galaxy: fire the quasar. Fractal flights: hyperspeed. Nebula: supernova (all as on a drop) |
+| `P` | Nebula: summon a pulsar |
 | `B` | Cyberpunk equaliser bars along the bottom (neon LED segments, glitch tears on hard hits) |
 | `A` | Album-art colours on / off |
 | `T` | Track titles on / off |
@@ -59,8 +60,8 @@ Press `D` until the device your music plays on is selected.
 | Beat | Shockwave from the core, brightness kick, gentle zoom swell. Locked to the predicted beat once the tempo is found |
 | Loudness of the section | Flight speed and overall brightness |
 | Build-up | Flight accelerates, gas thins and churns faster, light intensifies |
-| Drop | Big shockwave and flash, fast switch to a new look |
-| Phrase (8 bars) | Blends to a new look, on the downbeat |
+| Drop | A supernova ahead: flash, lens flare and a shockwave that lights the gas as the flight rushes through it; fast switch to a new look |
+| Phrase (8 bars) | Blends to a new look on the downbeat; the flight swoops to a new heading; sometimes a pulsar appears |
 | New song | New look; with album colours on, palettes come from the cover art |
 | Silence | Calm slow drift, dimmer, drops to 30 fps |
 
@@ -91,7 +92,7 @@ syncopated techno, where confidence stays honestly low so visuals don't lock ont
 
 Measured on an RTX 3080 at 2560×1440 fullscreen:
 
-* Nebula: about 1.2 ms GPU per frame. It renders at 50% resolution with temporal accumulation (TAA): each frame is
+* Nebula: about 1.65 ms GPU per frame. It renders at 50% resolution with temporal accumulation (TAA): each frame is
   jittered and blended with the reprojected previous result, which removes raymarch grain and recovers sub-pixel
   detail, so it looks the same as 60% did at about 30% less cost.
 * Neon Grid: about 1.7 ms GPU per frame (75% resolution, for crisp lines).

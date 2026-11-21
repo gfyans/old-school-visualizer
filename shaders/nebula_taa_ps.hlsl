@@ -52,7 +52,7 @@ float3 SampleHistory(float2 uv) {
 }
 
 struct Output {
-    float4 display : SV_Target0;   // into the host's target
+    float4 display : SV_Target0;   // into the resolved image (then the post pass)
     float4 history : SV_Target1;   // kept for next frame
 };
 
@@ -92,7 +92,6 @@ Output main(VSOut i) {
 
     Output o;
     o.history = float4(result, 1.0);
-    float2 v = i.uv - 0.5;
-    o.display = float4(result * (1.0 - dot(v, v) * 0.7), 1.0);   // vignette
+    o.display = float4(result, 1.0);   // bloom and vignette follow in nebula_post_ps
     return o;
 }

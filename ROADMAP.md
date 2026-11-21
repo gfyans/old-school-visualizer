@@ -24,10 +24,10 @@ Ideas for where this could go, roughly in order of impact. ✅ = done.
 
 ## 3. Nebula upgrades
 - ✅ **Temporal accumulation (TAA-style).** Reproject and blend previous frames to remove grain: sharper *and* cheaper.
-- **Real light scattering.** Light marching through the gas for bright rims and dark undersides.
-- **Bloom** on the core and stars; subtle lens effects.
-- **Events.** Comets, a pulsar sweeping on the beat, a supernova on a huge drop.
-- **Directed flight paths.** Steer towards interesting dense regions instead of wandering.
+- ✅ **Real light scattering.** Each gas sample looks towards the core: lit rims, dark undersides, god rays through the gaps.
+- ✅ **Bloom** on bright spots, and a lens flare on the supernova.
+- ✅ **Events.** A pulsar whose beams sweep through the gas in time with the bar, and a supernova on drops. (Comets were tried and dropped.)
+- ✅ **Directed flight.** Swoops to a new heading every 8 bars, banking into the turn; build-ups dive towards the core.
 
 ## 4. Feel and interaction
 - ✅ **Auto-cycle mode.** Switch visualisers on song change or every N minutes.

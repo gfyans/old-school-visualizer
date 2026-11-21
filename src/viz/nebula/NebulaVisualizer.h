@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <wrl/client.h>
 #include <random>
 #include "render/RenderTarget.h"
@@ -10,10 +10,16 @@
 //   bass      -> denser, brighter gas; the light core swells
 //   mids      -> more turbulence and faster churning of the gas
 //   treble    -> stars twinkle brighter, sparkles in the gas
-//   beat      -> shockwave shell from the core, brightness kick, slight zoom punch
+//   beat      -> shockwave shell from the core, brightness kick, slight zoom swell
 //   intensity -> flight speed and overall brightness (calm sections drift, loud ones rush)
 //   sections  -> every ~32 beats, or on a sudden "drop", blends to a new look
 //                (palette + gas shape) over a few seconds
+//   phrases   -> the flight swoops to a new heading; sometimes a pulsar appears, its
+//                lighthouse beams sweeping through the gas in time with the bar
+//   build-up  -> the flight dives towards the core, light beams intensify
+//   drop      -> a supernova ahead: blinding flash, lens flare, and a shockwave that lights
+//                the gas as the flight rushes through it
+// Light scattering (lit rims, dark undersides, god rays) and bloom make it all glow.
 class NebulaVisualizer : public IVisualizer {
 public:
     NebulaVisualizer();
@@ -47,8 +53,9 @@ private:
 
     // Temporal accumulation (TAA): jittered raymarch -> resolve with reprojected history.
     Microsoft::WRL::ComPtr<ID3D11Device> m_device;
-    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_taaPS;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_taaCB;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_taaPS, m_postPS;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> m_taaCB, m_postCB;
+    RenderTarget m_resolved;     // TAA output with mips, for bloom
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_clamp;
     RenderTarget m_current;      // this frame's raymarch: colour + gas distance
     RenderTarget m_history[2];   // ping-pong accumulated image
@@ -103,6 +110,21 @@ private:
     float m_lightStrength = 0.6f;
     float m_bass = 0, m_mids = 0, m_treble = 0;
     bool m_silent = true;
+
+    // Directed flight: swoops to a new heading every phrase
+    float m_yaw = 0.0f, m_pitch = 0.0f, m_yawTarget = 0.0f, m_pitchTarget = 0.0f, m_bank = 0.0f;
+    int m_gridBeatsSinceTurn = 0;
+    float m_timeSinceTurn = 0.0f;
+    float m_hyper = 0.0f;   // drop: rushing through the blast
+
+    // Events (positions in the wrapped world; used relative to the camera)
+    struct Pulsar { bool active = false; double pos[3] = {}; float axisU[3] = {}, axisV[3] = {}; float spin = 0.0f, fade = 0.0f, age = 0.0f; };
+    struct Supernova { bool active = false; double pos[3] = {}; float age = 0.0f; };
+    Pulsar m_pulsar;
+    Supernova m_nova;
+    float m_intensity = 0.0f;
+    void SpawnPulsar();
+    void Relative(const double world[3], float out[3]) const;   // world point minus the camera, the short way round
 
     std::wstring m_message;
 };

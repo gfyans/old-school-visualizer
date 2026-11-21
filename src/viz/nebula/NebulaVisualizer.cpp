@@ -2,6 +2,7 @@
 #include "render/Renderer.h"
 #include "g_nebula_ps.h"
 #include "g_nebula_taa_ps.h"
+#include "g_nebula_post_ps.h"
 #include "g_noise3d_cs.h"
 
 #include <algorithm>
@@ -27,7 +28,12 @@ struct NebulaConstants {   // matches cbuffer Nebula in nebula_ps.hlsl
     float colHot[3];     float ambient;
     float threshold, gain, warp, filament;
     float warpOffset[3]; float detail;
-    float jitter[2];     float frameIndex; float pad;
+    float jitter[2];     float frameIndex; float scatter;
+    float pulsarPos[3];  float pulsarStrength;
+    float pulsarDir[3];  float pulsarWidth;
+    float pulsarCol[3];  float snFlash;
+    float snPos[3];      float snShellRadius;
+    float snCol[3];      float snShellStrength;
 };
 static_assert(sizeof(NebulaConstants) % 16 == 0);
 
@@ -38,6 +44,18 @@ struct TaaConstants {   // matches cbuffer Taa in nebula_taa_ps.hlsl
     float camDelta[3];  float pad;
 };
 static_assert(sizeof(TaaConstants) % 16 == 0);
+
+struct PostConstants {   // matches cbuffer Post in nebula_post_ps.hlsl
+    float snScreen[2]; float snFlare; float bloom;
+    float flareCol[3]; float flash;
+};
+static_assert(sizeof(PostConstants) % 16 == 0);
+
+float Rand(std::mt19937& rng, float lo, float hi) { return std::uniform_real_distribution<float>(lo, hi)(rng); }
+void Normalize3(float v[3]) {
+    const float l = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (l > 1e-6f) { v[0] /= l; v[1] /= l; v[2] /= l; }
+}
 
 // Weight of each new frame in the accumulated image: lower = smoother but slower to react
 // (the neighbourhood clamp keeps beats and look changes responsive either way).
@@ -146,6 +164,9 @@ bool NebulaVisualizer::CreateResources(ID3D11Device* device) {
     if (FAILED(device->CreatePixelShader(g_nebula_taa_ps, sizeof(g_nebula_taa_ps), nullptr, &m_taaPS))) return false;
     cb.ByteWidth = sizeof(TaaConstants);
     if (FAILED(device->CreateBuffer(&cb, nullptr, &m_taaCB))) return false;
+    if (FAILED(device->CreatePixelShader(g_nebula_post_ps, sizeof(g_nebula_post_ps), nullptr, &m_postPS))) return false;
+    cb.ByteWidth = sizeof(PostConstants);
+    if (FAILED(device->CreateBuffer(&cb, nullptr, &m_postCB))) return false;
     m_historyValid = false;
 
     // Noise volume: generated once by a compute shader (~1 MB, a few ms of GPU time).
@@ -178,6 +199,9 @@ bool NebulaVisualizer::CreateResources(ID3D11Device* device) {
 
 void NebulaVisualizer::ReleaseResources() {
     m_current.Reset();
+    m_resolved.Reset();
+    m_postCB.Reset();
+    m_postPS.Reset();
     m_history[0].Reset();
     m_history[1].Reset();
     m_taaCB.Reset();
@@ -227,6 +251,34 @@ void NebulaVisualizer::NextLook(float blendSeconds) {
     m_changePending = false;
 }
 
+void NebulaVisualizer::Relative(const double world[3], float out[3]) const {
+    for (int i = 0; i < 3; ++i) {
+        double d = world[i] - m_pos[i];
+        d -= kWorldPeriod * std::floor(d / kWorldPeriod + 0.5);
+        out[i] = static_cast<float>(d);
+    }
+}
+
+// A pulsar appears well ahead and off to one side, so the flight sweeps past it.
+void NebulaVisualizer::SpawnPulsar() {
+    const float* right = m_basis[0];
+    const float* up = m_basis[1];
+    const float* fwd = m_basis[2];
+    const float side = std::uniform_int_distribution<int>(0, 1)(m_rng) ? 1.0f : -1.0f;
+    const float dist = Rand(m_rng, 20.0f, 26.0f), lateral = side * Rand(m_rng, 3.5f, 6.5f), lift = Rand(m_rng, -2.5f, 2.5f);
+    for (int i = 0; i < 3; ++i) m_pulsar.pos[i] = m_pos[i] + fwd[i] * dist + right[i] * lateral + up[i] * lift;
+    // Spin axis: tilted, so the beams sweep across the view rather than straight at the camera.
+    float axis[3] = { Rand(m_rng, -1, 1), Rand(m_rng, -1, 1), Rand(m_rng, -1, 1) };
+    Normalize3(axis);
+    float u[3] = { axis[1] * fwd[2] - axis[2] * fwd[1], axis[2] * fwd[0] - axis[0] * fwd[2], axis[0] * fwd[1] - axis[1] * fwd[0] };
+    Normalize3(u);
+    const float v[3] = { axis[1] * u[2] - axis[2] * u[1], axis[2] * u[0] - axis[0] * u[2], axis[0] * u[1] - axis[1] * u[0] };
+    memcpy(m_pulsar.axisU, u, sizeof(u));
+    memcpy(m_pulsar.axisV, v, sizeof(v));
+    m_pulsar.active = true;
+    m_pulsar.age = 0.0f;
+}
+
 void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_time += dt;
     m_silent = audio.silent;
@@ -245,19 +297,29 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
     // --- Song structure: drops and phrases ------------------------------------
     const bool gridLocked = audio.tempoConfidence > 0.4f;
     m_gridPulse = gridLocked ? std::pow(1.0f - audio.beatPhase, 4.0f) * audio.tempoConfidence : 0.0f;
-    if (gridLocked && audio.gridBeat != m_lastGridBeat) ++m_gridBeatsSinceChange;
+    if (gridLocked && audio.gridBeat != m_lastGridBeat) { ++m_gridBeatsSinceChange; ++m_gridBeatsSinceTurn; }
     m_lastGridBeat = audio.gridBeat;
 
     m_timeSinceChange += dt;
     if (audio.dropCount != m_lastDropCount) {
         m_lastDropCount = audio.dropCount;
-        // The drop: big shockwave and a fast switch to a new look.
+        // The drop: a supernova ahead, a rush through its blast, and a fast switch to a new look.
         m_shellAge = 0.0f;
-        m_shellPower = 2.0f;
+        m_shellPower = 1.0f;
         m_dropFlash = 1.0f;
+        m_hyper = 1.0f;
+        const float* fwd = m_basis[2];
+        const float* right = m_basis[0];
+        const float* up = m_basis[1];
+        const float lat = Rand(m_rng, -2.0f, 2.0f), lift = Rand(m_rng, -1.2f, 1.2f);
+        for (int i = 0; i < 3; ++i) m_nova.pos[i] = m_pos[i] + fwd[i] * 13.0f + right[i] * lat + up[i] * lift;
+        m_nova.active = true;
+        m_nova.age = 0.0f;
         if (!m_locked && m_timeSinceChange > 4.0f) NextLook(1.5f);
     }
     m_dropFlash *= std::exp(-dt / 0.8f);
+    m_hyper *= std::exp(-dt / 1.6f);
+    if (m_nova.active && (m_nova.age += dt) > 14.0f) m_nova.active = false;
 
     // Phrases: every 8 bars when the grid is locked (changing on the downbeat),
     // otherwise every 32 heard beats; and at least once a minute.
@@ -265,8 +327,26 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
     if (phraseDone && m_timeSinceChange > 20.0f) m_changePending = true;
     const bool onDownbeat = audio.barPhase < m_lastBarPhase;   // bar phase wrapped
     m_lastBarPhase = audio.barPhase;
-    if (!m_locked && ((m_changePending && (!gridLocked || onDownbeat)) || m_timeSinceChange > 60.0f))
+    if (!m_locked && ((m_changePending && (!gridLocked || onDownbeat)) || m_timeSinceChange > 60.0f)) {
         NextLook(kLookBlendSeconds);
+        if (!m_pulsar.active && !audio.silent && std::uniform_int_distribution<int>(0, 1)(m_rng) == 0) SpawnPulsar();
+    }
+
+    // --- Events -------------------------------------------------------------------
+    m_intensity = Smooth(m_intensity, audio.silent ? 0.0f : audio.intensity, dt, 1.0f, 2.0f);
+    // Pulsar: fades in, spins (two turns per bar when locked, so a beam crosses each beat),
+    // and fades out once the flight has passed it.
+    if (m_pulsar.active) {
+        m_pulsar.age += dt;
+        float rel[3];
+        Relative(m_pulsar.pos, rel);
+        const float ahead = rel[0] * m_basis[2][0] + rel[1] * m_basis[2][1] + rel[2] * m_basis[2][2];
+        const bool leaving = ahead < 3.0f || m_pulsar.age > 50.0f;
+        m_pulsar.fade = std::clamp(m_pulsar.fade + dt * (leaving ? -0.6f : 0.5f), 0.0f, 1.0f);
+        if (leaving && m_pulsar.fade <= 0.0f) m_pulsar.active = false;
+        if (gridLocked) m_pulsar.spin = 6.2831853f * 2.0f * audio.barPhase;
+        else m_pulsar.spin += dt * 6.2831853f * 0.7f;
+    }
     m_lookBlend = std::min(1.0f, m_lookBlend + dt / m_lookBlendSeconds);
 
     // --- Smoothed audio drivers ----------------------------------------------
@@ -279,6 +359,7 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
     const float targetSpeed = audio.silent ? 0.25f
         : 0.35f + 1.1f * audio.intensity + 0.5f * audio.bass + 0.25f * m_beatPulse + 1.2f * m_buildUp;
     m_speed = Smooth(m_speed, targetSpeed, dt, 0.5f, 2.0f);
+    const float flySpeed = m_speed + 3.5f * m_hyper;
 
     // Beat zoom: small and eased in (never a one-frame jump), which is what avoids motion sickness.
     m_zoom = Smooth(m_zoom, std::max(m_beatPulse, m_gridPulse), dt, 0.15f, 0.6f);
@@ -295,11 +376,25 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_swirl += dt * (0.003f + 0.02f * m_mids + 0.03f * m_buildUp);   // tension: the gas churns faster
     m_rollDrift += dt * (0.04f * m_mids + 0.05f * m_buildUp);
 
-    // --- Camera: slow wandering heading, flying forward ------------------------
+    // --- Camera: directed flight. Every 8 bars (or ~16 s) the flight swoops to a new heading,
+    // easing into the turn and banking with it; a gentle wander stops it feeling on rails.
+    m_timeSinceTurn += dt;
+    const bool turnDue = gridLocked ? (onDownbeat && m_gridBeatsSinceTurn >= 32) : m_timeSinceTurn > 16.0f;
+    if (turnDue && !audio.silent) {
+        m_yawTarget += Rand(m_rng, 0.5f, 1.3f) * (std::uniform_int_distribution<int>(0, 1)(m_rng) ? 1.0f : -1.0f);
+        m_pitchTarget = Rand(m_rng, -0.35f, 0.35f);
+        m_gridBeatsSinceTurn = 0;
+        m_timeSinceTurn = 0.0f;
+    }
+    const float prevYaw = m_yaw;
+    m_yaw = Smooth(m_yaw, m_yawTarget, dt, 2.2f, 2.2f);
+    m_pitch = Smooth(m_pitch, m_pitchTarget, dt, 2.5f, 2.5f);
+    const float yawRate = (m_yaw - prevYaw) / std::max(dt, 1e-4f);
+    m_bank = Smooth(m_bank, std::clamp(-yawRate * 0.9f, -0.5f, 0.5f), dt, 0.5f, 0.8f);
     const float t = m_time;
-    const float yaw = 0.8f * std::sin(t * 0.021f) + 0.4f * std::sin(t * 0.047f + 1.3f);
-    const float pitch = 0.35f * std::sin(t * 0.031f + 2.1f);
-    const float roll = 0.3f * std::sin(t * 0.017f) + m_rollDrift;
+    const float yaw = m_yaw + 0.25f * std::sin(t * 0.047f + 1.3f);
+    const float pitch = m_pitch + 0.12f * std::sin(t * 0.031f + 2.1f);
+    const float roll = 0.15f * std::sin(t * 0.017f) + m_rollDrift + m_bank;
     const float fwd[3] = { std::cos(pitch) * std::sin(yaw), std::sin(pitch), std::cos(pitch) * std::cos(yaw) };
     // right = normalize(cross(worldUp, fwd)); up = cross(fwd, right)
     float right[3] = { fwd[2], 0.0f, -fwd[0] };
@@ -315,7 +410,7 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
         m_basis[2][c] = fwd[c];
     }
     for (int c = 0; c < 3; ++c) {
-        m_pos[c] += double(fwd[c]) * m_speed * dt;
+        m_pos[c] += double(fwd[c]) * flySpeed * dt;
         m_pos[c] = std::fmod(m_pos[c], kWorldPeriod);
         if (m_pos[c] < 0) m_pos[c] += kWorldPeriod;
     }
@@ -334,12 +429,14 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
         c.camUp[i] = up[i];
         c.camFwd[i] = fwd[i];
         // The light core floats ahead of the camera, drifting around the centre of view.
-        c.lightPos[i] = c.camPos[i] + fwd[i] * 9.0f
-                      + right[i] * 2.5f * std::sin(m_time * 0.13f)
-                      + up[i] * 1.5f * std::sin(m_time * 0.17f + 1.0f);
+        // Build-ups pull it closer and into the centre: the flight dives towards it.
+        const float centre = 1.0f - 0.7f * m_buildUp;
+        c.lightPos[i] = c.camPos[i] + fwd[i] * (9.0f - 3.5f * m_buildUp)
+                      + right[i] * 2.5f * centre * std::sin(m_time * 0.13f)
+                      + up[i] * 1.5f * centre * std::sin(m_time * 0.17f + 1.0f);
         c.lightColor[i] = 0.6f * look.hot[i] + 0.4f * look.mid[i];
     }
-    c.tanHalfFov = std::tan((38.0f - 0.8f * m_zoom) * kPi / 180.0f);   // beat: gentle zoom swell
+    c.tanHalfFov = std::tan((38.0f - 0.8f * m_zoom + 6.0f * m_hyper + 3.0f * m_buildUp) * kPi / 180.0f);   // beat: gentle zoom swell; rushes widen the view
     c.exposure = m_exposure * 2.4f;
     c.starBoost = (m_silent ? 0.9f : 0.9f + 1.6f * m_treble);
     c.sparkle = m_treble * 1.5f;
@@ -359,6 +456,55 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
     c.warpOffset[1] = m_swirl * 0.7f;
     c.warpOffset[2] = m_swirl * 0.4f;
     c.detail = look.detail;
+    c.scatter = 1.0f + 1.5f * m_buildUp + 0.8f * m_bass;
+
+    // Events
+    const float hotWhite[3] = { 0.85f, 0.92f, 1.0f };
+    if (m_pulsar.active && m_pulsar.fade > 0.0f) {
+        float rel[3];
+        Relative(m_pulsar.pos, rel);
+        const float cs = std::cos(m_pulsar.spin), sn = std::sin(m_pulsar.spin);
+        for (int i = 0; i < 3; ++i) {
+            c.pulsarPos[i] = c.camPos[i] + rel[i];
+            c.pulsarDir[i] = m_pulsar.axisU[i] * cs + m_pulsar.axisV[i] * sn;
+            c.pulsarCol[i] = 0.6f * hotWhite[i] + 0.4f * look.hot[i];
+        }
+        const float f = m_pulsar.fade * m_pulsar.fade * (3.0f - 2.0f * m_pulsar.fade);
+        c.pulsarStrength = f * (0.8f + 0.5f * m_gridPulse);
+        c.pulsarWidth = 0.22f;
+    } else {
+        c.pulsarPos[0] = c.camPos[0] + 1e4f;   // far away: contributes nothing
+    }
+    float novaFlare = 0.0f;
+    float novaScreen[2] = { -10.0f, -10.0f };
+    if (m_nova.active) {
+        float rel[3];
+        Relative(m_nova.pos, rel);
+        const float a = m_nova.age;
+        const float flash = std::exp(-a / 0.45f);
+        const float remnant = 0.18f * std::exp(-a / 5.0f) * std::min(1.0f, a * 4.0f);
+        c.snFlash = flash * 1.2f + remnant;
+        c.snShellRadius = a * 9.0f;
+        c.snShellStrength = 1.6f * std::max(0.0f, 1.0f - a / 3.0f);
+        const float shift = std::min(1.0f, a / 2.5f);   // white-hot, then the look's colours
+        for (int i = 0; i < 3; ++i) {
+            c.snPos[i] = c.camPos[i] + rel[i];
+            c.snCol[i] = hotWhite[i] * (1.0f - shift) + (0.5f * look.hot[i] + 0.5f * look.mid[i]) * shift;
+        }
+        // Where it is on screen, for the lens flare.
+        const float z = rel[0] * fwd[0] + rel[1] * fwd[1] + rel[2] * fwd[2];
+        if (z > 0.5f) {
+            const int bw = renderer.BoundWidth(), bh = renderer.BoundHeight();
+            const float aspect = static_cast<float>(bw) / std::max(bh, 1);
+            const float sx = (rel[0] * right[0] + rel[1] * right[1] + rel[2] * right[2]) / (z * c.tanHalfFov);
+            const float sy = (rel[0] * up[0] + rel[1] * up[1] + rel[2] * up[2]) / (z * c.tanHalfFov);
+            novaScreen[0] = (sx / aspect + 1.0f) * 0.5f;
+            novaScreen[1] = (1.0f - sy) * 0.5f;
+            novaFlare = flash * 1.0f + remnant * 1.5f;
+        }
+    } else {
+        c.snPos[0] = c.camPos[0] + 1e4f;
+    }
 
     // --- Temporal accumulation setup ---
     ID3D11RenderTargetView* hostTarget = renderer.BoundTarget();
@@ -368,9 +514,10 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
         m_current.Create(m_device.Get(), w, h, DXGI_FORMAT_R16G16B16A16_FLOAT);
         m_history[0].Create(m_device.Get(), w, h, DXGI_FORMAT_R16G16B16A16_FLOAT);
         m_history[1].Create(m_device.Get(), w, h, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        m_resolved.Create(m_device.Get(), w, h, DXGI_FORMAT_R11G11B10_FLOAT, true);
         m_historyValid = false;
     }
-    if (!m_current.rtv || !m_history[0].rtv || !m_history[1].rtv) return;
+    if (!m_current.rtv || !m_history[0].rtv || !m_history[1].rtv || !m_resolved.rtv) return;
 
     // Halton(2,3) sub-pixel jitter: 8 well-spread positions per cycle.
     static constexpr float kHalton[8][2] = { { 0.500f, 0.333f }, { 0.250f, 0.667f }, { 0.750f, 0.111f }, { 0.125f, 0.444f },
@@ -405,6 +552,14 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
     };
     upload(m_cb.Get(), &c, sizeof(c));
     upload(m_taaCB.Get(), &taa, sizeof(taa));
+    PostConstants post{};
+    post.snScreen[0] = novaScreen[0];
+    post.snScreen[1] = novaScreen[1];
+    post.snFlare = novaFlare;
+    post.bloom = 1.0f + 0.6f * m_buildUp + 0.5f * m_bass + 0.8f * m_dropFlash;
+    for (int i = 0; i < 3; ++i) post.flareCol[i] = c.snCol[i];
+    post.flash = 0.08f * std::exp(-m_nova.age / 0.12f) * (m_nova.active ? 1.0f : 0.0f);
+    upload(m_postCB.Get(), &post, sizeof(post));
     ID3D11Buffer* cbs[2] = { m_cb.Get(), m_taaCB.Get() };
     ID3D11ShaderResourceView* none[2] = {};
 
@@ -418,11 +573,11 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
     renderer.DrawFullscreen(m_ps.Get());
     ctx->PSSetShaderResources(0, 1, none);
 
-    // Pass 2: resolve against history -> host target (display) + new history (two outputs).
+    // Pass 2: resolve against history -> resolved image + new history (two outputs).
     RenderTarget& prevHistory = m_history[m_historyIndex];
     RenderTarget& nextHistory = m_history[1 - m_historyIndex];
-    renderer.BindTarget(hostTarget, w, h, time, dt);
-    ID3D11RenderTargetView* targets[2] = { hostTarget, nextHistory.rtv.Get() };
+    renderer.BindTarget(m_resolved.rtv.Get(), w, h, time, dt);
+    ID3D11RenderTargetView* targets[2] = { m_resolved.rtv.Get(), nextHistory.rtv.Get() };
     ctx->OMSetRenderTargets(2, targets, nullptr);
     ID3D11ShaderResourceView* inputs[2] = { m_current.srv.Get(), prevHistory.srv.Get() };
     ID3D11SamplerState* clamp = m_clamp.Get();
@@ -431,7 +586,18 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
     ctx->PSSetSamplers(0, 1, &clamp);
     renderer.DrawFullscreen(m_taaPS.Get());
     ctx->PSSetShaderResources(0, 2, none);
-    ctx->OMSetRenderTargets(1, &hostTarget, nullptr);
+
+    // Pass 3: bloom, lens flare and vignette into the host's target.
+    ctx->OMSetRenderTargets(0, nullptr, nullptr);
+    ctx->GenerateMips(m_resolved.srv.Get());
+    renderer.BindTarget(hostTarget, w, h, time, dt);
+    ID3D11Buffer* postCB = m_postCB.Get();
+    ID3D11ShaderResourceView* resolved = m_resolved.srv.Get();
+    ctx->PSSetConstantBuffers(3, 1, &postCB);
+    ctx->PSSetShaderResources(0, 1, &resolved);
+    ctx->PSSetSamplers(0, 1, &clamp);
+    renderer.DrawFullscreen(m_postPS.Get());
+    ctx->PSSetShaderResources(0, 1, none);
     m_historyIndex = 1 - m_historyIndex;
     m_historyValid = true;
 
@@ -445,6 +611,15 @@ bool NebulaVisualizer::OnKey(UINT vk) {
     if (vk == 'N') {
         NextLook();
         m_message = std::wstring(kPalettes[m_paletteIndex].name) + L"  ·  " + kShapes[m_shapeIndex].name;
+        return true;
+    }
+    if (vk == 'Q') {   // supernova, as on a drop
+        m_lastDropCount = ~0u;
+        return true;
+    }
+    if (vk == 'P') {   // summon a pulsar
+        SpawnPulsar();
+        m_pulsar.fade = 0.0f;
         return true;
     }
     if (vk == VK_SPACE) {

@@ -2,7 +2,10 @@
 
 // Volumetric nebula: a ray per pixel marches through animated, domain-warped
 // noise, accumulating emissive gas front to back. A drifting light core
-// illuminates nearby gas; beats launch a shockwave shell from it. Stars show
+// illuminates nearby gas, and each gas sample looks a short way towards it to see how
+// much gas is in the way (light scattering): clouds get bright rims facing the core,
+// dark undersides, and beams of light through the gaps. Events add more light sources:
+// a pulsar whose lighthouse beams sweep through the gas in time with the music, and on drops a supernova whose shockwave lights the gas as it passes. Stars show
 // through wherever the gas is thin. All audio response is computed on the CPU
 // (NebulaVisualizer.cpp) and arrives here as smooth parameters.
 
@@ -18,7 +21,12 @@ cbuffer Nebula : register(b2) {   // matches NebulaConstants in NebulaVisualizer
     float3 colHot;      float ambient;
     float threshold;    float gain;  float warp;  float filament;
     float3 warpOffset;  float detail;
-    float2 jitter;      float frameIndex;  float nebulaPad;   // TAA: sub-pixel jitter (pixels), frame counter
+    float2 jitter;      float frameIndex;  float scatter;   // TAA: sub-pixel jitter (pixels), frame counter; god-ray strength
+    float3 pulsarPos;   float pulsarStrength;
+    float3 pulsarDir;   float pulsarWidth;    // one beam points along +dir, the other along -dir
+    float3 pulsarCol;   float snFlash;
+    float3 snPos;       float snShellRadius;
+    float3 snCol;       float snShellStrength;
 };
 
 Texture3D<float4> Noise : register(t0);
@@ -52,6 +60,16 @@ void Gas(float3 p, out float density, out float dust, out float shade, out float
     dust = saturate((w.y - 0.58) * 6.0) * saturate((b.y - 0.35) * 2.0);
     shade = saturate((a.z - 0.5) * 2.2 + 0.5);
     glint = b.w;
+}
+
+// A cheaper density (first warp level and the two main octaves) for the light-scattering
+// look-ahead: close enough to say whether gas lies between a point and the light.
+float GasLite(float3 p) {
+    float4 w = Noise.SampleLevel(Wrap, p / 64.0 + warpOffset, 0);
+    float3 q = p + (float3(w.x, w.z, w.y) - 0.5) * warp;
+    float4 a = Noise.SampleLevel(Wrap, q / 32.0, 0);
+    float4 b = Noise.SampleLevel(Wrap, q / 8.0, 0);
+    return saturate((lerp(a.x, a.y, filament) + (b.x - 0.5) * detail - threshold) * gain);
 }
 
 float3 Stars(float3 rd) {
@@ -100,6 +118,20 @@ float4 main(VSOut i) : SV_Target {
         float glow = lightStrength / (1.0 + dl2 * 0.12);
         float shell = shellStrength * exp(-abs(dl - shellRadius) * 1.4);
 
+        // Pulsar: two narrow beams from a spinning star, widening slightly with distance.
+        float3 pv = p - pulsarPos;
+        float along = dot(pv, pulsarDir);
+        float perp2 = dot(pv, pv) - along * along;
+        float bw = pulsarWidth * (1.0 + abs(along) * 0.08);
+        float beam = pulsarStrength * exp(-perp2 / (bw * bw)) * exp(-abs(along) * 0.04);
+        float pulsarCore = pulsarStrength * 2.0 / (1.0 + dot(pv, pv) * 6.0);
+
+        // Supernova: a blinding flash, then a shockwave shell that lights the gas as it passes.
+        float3 sv = p - snPos;
+        float ds = length(sv);
+        float snGlow = snFlash * 2.5 / (1.0 + ds * ds * 0.15);
+        float snShell = snShellStrength * exp(-abs(ds - snShellRadius) * 1.1);
+
         float density, dust, shade, glint;
         Gas(p, density, dust, shade, glint);
         // Fade gas very close to the lens: up close the noise is magnified into big soft blobs.
@@ -108,11 +140,23 @@ float4 main(VSOut i) : SV_Target {
         dust *= fade;
 
         [branch] if (density + dust > 0.003) {
+            // Light scattering: how much gas lies between this point and the core?
+            float lit = 1.0;
+            [branch] if (glow > 0.04) {
+                float occ = GasLite(p + toLight / dl * 0.9);
+                lit = exp(-occ * absorb * 1.6);
+            }
+            float light = glow * (0.15 + 0.85 * lit);
             // Thin gas sits in the deep colour; dense or lit cores climb to the hot colour.
-            float heat = density * 0.75 + (shade - 0.5) * 0.45 + glow * 0.18 + shell * 0.3;
+            float heat = density * 0.75 + (shade - 0.5) * 0.45 + light * 0.18 + shell * 0.3 + snShell * 0.6 + beam * 0.3;
             float3 c = Palette(heat);
-            float3 emission = c * (ambient + glow + shell * 1.6) * (0.12 + density)
+            float3 emission = c * (ambient + light + shell * 1.6) * (0.12 + density)
                             + colHot * (pow(saturate(glint), 10.0) * sparkle * (0.5 + glow) * density);
+            // Rims: the thin, lit edges of clouds facing the core glow hot.
+            emission += colHot * glow * lit * saturate(1.0 - density * 2.5) * density * 0.6;
+            // Event light falling on the gas.
+            emission += pulsarCol * (beam * 1.3 + pulsarCore) * (0.05 + density);
+            emission += snCol * (snGlow + snShell * 1.6) * (0.05 + density);
             emission *= exp(-t * 0.035);   // distant gas recedes into darkness: depth
             float alphaGas = 1.0 - exp(-density * stepLen * absorb);
             float alphaAll = 1.0 - exp(-(density * absorb + dust * 1.5) * stepLen);
@@ -122,8 +166,11 @@ float4 main(VSOut i) : SV_Target {
             transmittance *= 1.0 - alphaAll;
             if (transmittance < 0.02) break;
         }
-        // Light scattered by thin dust between clouds: the core's halo.
-        col += transmittance * lightColor * (glow * glow * stepLen * 0.012);
+        // Light scattered by thin dust between clouds: the core's halo and beams through the
+        // gaps (gas in front has already cut the transmittance, which makes the rays).
+        col += transmittance * stepLen * (lightColor * glow * glow * 0.012 * scatter
+                                        + pulsarCol * (beam * 0.025 + pulsarCore * 0.02)
+                                        + snCol * snGlow * 0.012);
 
         t += stepLen;
         if (t > kMaxDist) break;
@@ -143,5 +190,5 @@ float4 main(VSOut i) : SV_Target {
     // Alpha carries where the gas is (opacity-weighted distance); mostly empty pixels count as
     // infinitely far, so they reproject by direction alone (stars, far haze).
     float depth = depthWeight > 0.05 ? depthSum / depthWeight : 1000.0;
-    return float4(col, depth);   // vignette is applied after the TAA resolve
+    return float4(col, depth);   // bloom and vignette are applied after the TAA resolve
 }
