@@ -40,6 +40,8 @@ Where this is going next, in order. ✅ = done.
   grid layouts, ASCII / dither / LED / scan lines); ✅ Detonation (city, dome, void, crater, camera director; blasts on drops,
   released build-ups and big phrases; a dome that punches with the kicks);
   ✅ Spectrum.
-- **Feel:** ✅ auto-cycle; ✅ transitions with character; ✅ glitch filter over every scene (`X`).
+- **Feel:** ✅ auto-cycle; ✅ Random scene changes (a new scene and look every minute or so, on the phrase);
+  ✅ transitions with character; ✅ glitch filter over every scene (`X`).
+- **Ease of use:** ✅ right-click menu with every setting; ✅ short help with the current visualiser's keys.
 - **Beyond the screen:** ✅ multi-monitor; ✅ MP4 recording and instant replay; ✅ stream mode for OBS;
   ✅ automatic updates.

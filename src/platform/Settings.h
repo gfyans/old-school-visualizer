@@ -14,7 +14,7 @@ struct Settings {
     bool showBars = false;      // equaliser bars along the bottom
     bool albumColours = true;   // take palettes from the playing track's album art
     bool trackTitles = true;    // show title/artist when a song starts
-    bool autoCycle = false;     // new visualiser with each song
+    int sceneChanges = 0;       // 0 off, 1 a new visualiser with each song, 2 random scene and look about every minute
     bool instantReplay = false; // keep the last 30 s ready to save as a video
     std::wstring videoFolder;   // where recordings go (empty = Videos\Visualizer)
     bool moodColour = true;     // tint the picture by the music's mood and chords

@@ -26,6 +26,10 @@ public:
     void Update(const AudioFeatures& audio, float dt) override;
     void Render(Renderer& renderer, float time, float dt) override;
     bool OnKey(UINT vk) override;
+    std::vector<VisualizerAction> Actions() const override {
+        return { { 'N', L"Next look (Night, Ink, Dusk)" }, { 'M', L"Next camera shot" }, { 'Q', L"Detonate" }, { VK_SPACE, L"Lock / unlock the look" } };
+    }
+    bool Busy() const override { return m_phase == Phase::Blast || m_phase == Phase::Collapse || (m_phase == Phase::Void && m_phaseTime < 6.0f); }
     std::wstring TakeMessage() override;
     std::wstring Status() const override;
     void AccentColours(float lo[3], float hi[3]) const override;

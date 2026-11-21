@@ -47,10 +47,16 @@ public:
     std::function<void(UINT vk)> onKeyDown;   // non-repeating key presses only
     std::function<void()> onClose;            // just before the window is destroyed (also on log-off)
     std::function<void(bool)> onFullscreenChanged;
+    std::function<void(POINT screen)> onContextMenu;   // right-click (or the menu key)
 
 private:
     static LRESULT CALLBACK StaticWndProc(HWND, UINT, WPARAM, LPARAM);
     LRESULT WndProc(UINT msg, WPARAM wp, LPARAM lp);
+
+    static constexpr UINT_PTR kCursorTimer = 1;
+    static constexpr ULONGLONG kCursorHideMs = 2000;   // fullscreen: hide the pointer after this long still
+    ULONGLONG m_lastMouseMove = 0;
+    POINT m_lastMousePos{ -100000, -100000 };
 
     HWND m_hwnd = nullptr;
     bool m_fullscreen = false;

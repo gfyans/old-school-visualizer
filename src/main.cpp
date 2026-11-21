@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <random>
 
 namespace {
 
@@ -30,6 +31,7 @@ constexpr wchar_t kAppName[] = L"Visualizer";
 constexpr float kIdleAfterSilence = 5.0f;   // seconds of silence before dropping to low-power frame rate
 constexpr double kIdleFps = 30.0;
 constexpr float kAutoCycleSeconds = 240.0f;   // auto-cycle fallback when no song changes are reported
+constexpr float kRandomSeconds = 60.0f;       // Random: about this long on each scene (then the next phrase)
 
 // To add a visualiser: implement IVisualizer and add it here. Order = ←/→ order.
 void RegisterVisualizers(VisualizerHost& host) {
@@ -163,9 +165,33 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     };
     static const wchar_t* kGlitchNames[] = { L"Glitch filter off", L"Glitch filter: ASCII", L"Glitch filter: dither",
                                              L"Glitch filter: LED", L"Glitch filter: scan lines" };
-    bool autoCycle = settings.autoCycle;
+    // Scene changes (C): 0 off, 1 a new visualiser with each song, 2 Random: a random visualiser and look
+    // about every minute, switched on a phrase (or on a drop).
+    int sceneChanges = settings.sceneChanges;
+    static const wchar_t* kSceneNames[] = { L"Scene changes off", L"Scene changes: a new visualiser with each song",
+                                            L"Random: a new scene and look about every minute" };
     float sinceSwitch = 0.0f;
-    auto announce = [&] { overlay.ShowMessage(host.Active().Name()); sinceSwitch = 0.0f; };
+    int barsSinceSwitch = 0;
+    float lastBarPhase = 0.0f;
+    uint32_t seenRandomDrop = 0;
+    std::mt19937 rng(std::random_device{}());
+    int recent[2] = { -1, -1 };   // the last visualisers Random showed, not to repeat straight away
+    auto announce = [&] { overlay.ShowMessage(host.Active().Name()); sinceSwitch = 0.0f; barsSinceSwitch = 0; };
+    auto randomScene = [&] {
+        std::vector<int> pool;
+        for (int i = 0; i < host.Count(); ++i)
+            if (i != host.Current() && i != recent[0] && i != recent[1]) pool.push_back(i);
+        if (pool.empty()) for (int i = 0; i < host.Count(); ++i) if (i != host.Current()) pool.push_back(i);
+        if (pool.empty()) return;
+        const int pick = pool[rng() % pool.size()];
+        recent[1] = recent[0];
+        recent[0] = host.Current();
+        host.Select(pick);
+        host.Active().Randomise(rng());
+        host.ShuffleExtras();
+        if (glitchFilter != 0 && rng() % 3 == 0) glitchFilter = 1 + static_cast<int>(rng() % 4);
+        announce();
+    };
 
     // D: cycle System default -> each active output device -> back to default.
     auto cycleAudioDevice = [&] {
@@ -175,13 +201,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         for (int i = 0; i < static_cast<int>(devices.size()); ++i)
             if (devices[i].id == current) index = i;
         index = index + 1 < static_cast<int>(devices.size()) ? index + 1 : -1;
-        if (index < 0) {
-            capture->SetPreferredDevice({});
-            overlay.ShowMessage(L"Audio: system default output", 3.0f);
-        } else {
-            capture->SetPreferredDevice(devices[index].id);
-            overlay.ShowMessage(L"Audio: " + devices[index].name, 3.0f);
-        }
+        capture->SetPreferredDevice(index < 0 ? std::wstring() : devices[index].id);
+        overlay.ShowMessage(index < 0 ? std::wstring(L"Audio: system default output") : L"Audio: " + devices[index].name, 3.0f);
     };
 
     // --- Multi-monitor ------------------------------------------------------------------
@@ -228,14 +249,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             }
         }
     };
-    auto cycleDisplayMode = [&] {
+    auto setDisplayMode = [&](int mode) {
         if (Window::Monitors().size() < 2) { overlay.ShowMessage(L"Only one monitor is connected", 2.0f); return; }
-        displayMode = (displayMode + 1) % 3;
+        displayMode = mode % 3;
         applyDisplay();
         if (!window.IsFullscreen()) window.SetFullscreen(true);
         static const wchar_t* kNames[] = { L"One monitor", L"Every monitor: a different visualiser on each", L"Spanning every monitor" };
         overlay.ShowMessage(kNames[displayMode], 2.5f);
     };
+    auto cycleDisplayMode = [&] { setDisplayMode(displayMode + 1); };
     auto nextMonitor = [&] {
         const std::vector<MonitorDesc> monitors = Window::Monitors();
         if (monitors.size() < 2) { overlay.ShowMessage(L"Only one monitor is connected", 2.0f); return; }
@@ -266,7 +288,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         settings.showBars = eqBars.Visible();
         settings.albumColours = albumColours;
         settings.trackTitles = trackTitles;
-        settings.autoCycle = autoCycle;
+        settings.sceneChanges = sceneChanges;
         settings.instantReplay = recorder.InstantReplay();
         settings.videoFolder = videoFolder;
         settings.moodColour = moodColour;
@@ -280,6 +302,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     window.onResize = [&](int cw, int ch) {
         renderer.Resize(cw, ch);
         host.Resize(cw, ch);
+    };
+    auto setSceneChanges = [&](int mode) {
+        sceneChanges = mode;
+        sinceSwitch = 0.0f;
+        barsSinceSwitch = 0;
+        overlay.ShowMessage(kSceneNames[sceneChanges], 2.5f);
+    };
+    auto setStreamMode = [&](int mode) {
+        if (mode == streamMode) return;
+        if (streamMode == 0 && mode != 0) window.SetClientSize(1920, 1080);
+        if (mode == 0) window.RestoreSize();
+        streamMode = mode;
+        if (streamMode == 2 && !eqBars.Visible()) eqBars.SetVisible(true);
+        static const wchar_t* kModes[] = { L"Stream mode off", L"Stream mode: clean (no on-screen text, 1920 x 1080 window)",
+                                           L"Stream mode: EQ bars on green (chroma key)" };
+        // In stream mode on-screen text is hidden, so say it in the title bar instead.
+        window.SetTitle(streamMode ? kModes[streamMode] : kAppName);
+        if (streamMode == 0) overlay.ShowMessage(kModes[0], 1.5f);
+    };
+    auto setAudioDevice = [&](const AudioDevice* device) {
+        capture->SetPreferredDevice(device ? device->id : std::wstring());
+        overlay.ShowMessage(device ? L"Audio: " + device->name : std::wstring(L"Audio: system default output"), 3.0f);
     };
     window.onKeyDown = [&](UINT vk) {
         switch (vk) {
@@ -301,23 +345,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
                                              : L"Album colours off", 2.0f);
             break;
         case 'C':
-            autoCycle = !autoCycle;
-            sinceSwitch = 0.0f;
-            overlay.ShowMessage(autoCycle ? L"Auto-cycle on: a new visualiser with each song" : L"Auto-cycle off", 2.5f);
+            setSceneChanges((sceneChanges + 1) % 3);
             break;
         case 'W':        cycleDisplayMode(); break;
-        case 'O': {
-            streamMode = (streamMode + 1) % 3;
-            if (streamMode == 1) window.SetClientSize(1920, 1080);
-            if (streamMode == 0) window.RestoreSize();
-            if (streamMode == 2 && !eqBars.Visible()) eqBars.SetVisible(true);
-            static const wchar_t* kModes[] = { L"Stream mode off", L"Stream mode: clean (no on-screen text, 1920 x 1080 window)",
-                                               L"Stream mode: EQ bars on green (chroma key)" };
-            // In stream mode on-screen text is hidden, so say it in the title bar instead.
-            window.SetTitle(streamMode ? kModes[streamMode] : kAppName);
-            if (streamMode == 0) overlay.ShowMessage(kModes[0], 1.5f);
-            break;
-        }
+        case 'O':        setStreamMode((streamMode + 1) % 3); break;
         case 'U':
             if (updater.Ready()) {
                 saveSettings();
@@ -373,6 +404,115 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         }
     };
 
+    // --- The right-click menu: every setting, with its key alongside -------------------------
+    window.onContextMenu = [&](POINT at) {
+        enum : UINT { kViz = 1000, kScene = 1100, kGlitch = 1200, kDevice = 1300, kDisplay = 1400, kStream = 1500 };
+        auto keyName = [](UINT vk) -> std::wstring {
+            switch (vk) {
+            case VK_SPACE: return L"Space";
+            case VK_LEFT: return L"\u2190";
+            case VK_RIGHT: return L"\u2192";
+            case VK_F1: return L"F1";
+            case VK_ESCAPE: return L"Esc";
+            default: return std::wstring(1, static_cast<wchar_t>(vk));
+            }
+        };
+        auto item = [&](HMENU m, UINT id, const std::wstring& label, UINT key = 0, bool checked = false, bool enabled = true) {
+            const std::wstring text = key ? label + L"\t" + keyName(key) : label;
+            AppendMenuW(m, MF_STRING | (checked ? MF_CHECKED : 0) | (enabled ? 0 : MF_GRAYED), id, text.c_str());
+        };
+        auto radio = [&](HMENU m, UINT id, const std::wstring& label, bool on) {
+            AppendMenuW(m, MF_STRING, id, label.c_str());
+            if (on) CheckMenuRadioItem(m, id, id, id, MF_BYCOMMAND);
+        };
+        auto sub = [&](HMENU m, HMENU child, const wchar_t* label) { AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(child), label); };
+        auto sep = [](HMENU m) { AppendMenuW(m, MF_SEPARATOR, 0, nullptr); };
+
+        HMENU menu = CreatePopupMenu();
+        HMENU vizMenu = CreatePopupMenu();
+        for (int i = 0; i < host.Count(); ++i) radio(vizMenu, kViz + i, host.At(i).Name(), i == host.Current());
+        sep(vizMenu);
+        item(vizMenu, VK_LEFT, L"Previous", VK_LEFT);
+        item(vizMenu, VK_RIGHT, L"Next", VK_RIGHT);
+        sub(menu, vizMenu, L"Visualiser");
+
+        HMENU sceneMenu = CreatePopupMenu();
+        static const wchar_t* kSceneItems[] = { L"Off", L"A new visualiser with each song", L"Random: a new scene and look every minute or so" };
+        for (int i = 0; i < 3; ++i) radio(sceneMenu, kScene + i, kSceneItems[i], i == sceneChanges);
+        sub(menu, sceneMenu, L"Scene changes\tC");
+
+        // The visualiser's own keys.
+        const std::vector<VisualizerAction> actions = host.Active().Actions();
+        if (!actions.empty()) {
+            sep(menu);
+            for (const VisualizerAction& a : actions) item(menu, a.key, a.label, a.key);
+        }
+        sep(menu);
+
+        HMENU effects = CreatePopupMenu();
+        HMENU glitch = CreatePopupMenu();
+        static const wchar_t* kGlitchItems[] = { L"Off", L"ASCII", L"Dither", L"LED", L"Scan lines" };
+        for (int i = 0; i < 5; ++i) radio(glitch, kGlitch + i, kGlitchItems[i], i == glitchFilter);
+        sub(effects, glitch, L"Glitch filter\tX");
+        item(effects, 'B', L"Equaliser bars", 'B', eqBars.Visible());
+        item(effects, 'K', L"Mood colour", 'K', moodColour);
+        item(effects, 'A', L"Album-art colours", 'A', albumColours);
+        item(effects, 'T', L"Track titles", 'T', trackTitles);
+        sub(menu, effects, L"Effects");
+
+        HMENU display = CreatePopupMenu();
+        item(display, 'F', L"Fullscreen", 'F', window.IsFullscreen());
+        const bool multi = Window::Monitors().size() >= 2;
+        sep(display);
+        static const wchar_t* kDisplayItems[] = { L"One monitor", L"A different visualiser on each monitor", L"Spanning every monitor" };
+        for (int i = 0; i < 3; ++i) {
+            radio(display, kDisplay + i, kDisplayItems[i], multi && i == displayMode);
+            if (!multi) EnableMenuItem(display, kDisplay + i, MF_BYCOMMAND | MF_GRAYED);
+        }
+        item(display, 'G', L"Next monitor", 'G', false, multi);
+        sep(display);
+        HMENU stream = CreatePopupMenu();
+        static const wchar_t* kStreamItems[] = { L"Off", L"Clean (no on-screen text, 1920 x 1080)", L"Equaliser bars on green" };
+        for (int i = 0; i < 3; ++i) radio(stream, kStream + i, kStreamItems[i], i == streamMode);
+        sub(display, stream, L"Stream mode\tO");
+        sub(menu, display, L"Display");
+
+        HMENU audioMenu = CreatePopupMenu();
+        const std::vector<AudioDevice> devices = AudioCapture::ListOutputDevices();
+        const std::wstring current = capture->PreferredDevice();
+        radio(audioMenu, kDevice, L"System default", current.empty());
+        for (int i = 0; i < static_cast<int>(devices.size()) && i < 90; ++i)
+            radio(audioMenu, kDevice + 1 + i, devices[i].name, devices[i].id == current);
+        sub(menu, audioMenu, L"Audio device\tD");
+
+        HMENU record = CreatePopupMenu();
+        item(record, 'R', recorder.Recording() ? L"Stop and save the recording" : L"Record", 'R', false, canRecord);
+        item(record, 'I', L"Instant replay", 'I', recorder.InstantReplay(), canRecord);
+        item(record, 'S', L"Save the last 30 seconds", 'S', false, canRecord && recorder.InstantReplay());
+        item(record, 'V', L"Video folder\u2026", 'V', false, canRecord);
+        sub(menu, record, L"Record");
+        sep(menu);
+
+        item(menu, VK_F1, L"Stats", VK_F1, showStats);
+        item(menu, 'H', L"Help", 'H', showHelp);
+        item(menu, 'U', updater.Ready() ? L"Restart to update" : L"Check for updates", 'U');
+        sep(menu);
+        item(menu, 1, window.IsFullscreen() ? L"Leave fullscreen" : L"Quit", VK_ESCAPE);
+
+        SetForegroundWindow(window.Handle());
+        const UINT cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, at.x, at.y, 0, window.Handle(), nullptr);
+        DestroyMenu(menu);   // and its submenus
+        if (cmd == 0) return;
+        if (cmd == 1) window.onKeyDown(VK_ESCAPE);
+        else if (cmd >= kStream && cmd < kStream + 3) setStreamMode(cmd - kStream);
+        else if (cmd >= kDisplay && cmd < kDisplay + 3) setDisplayMode(cmd - kDisplay);
+        else if (cmd >= kDevice && cmd < kDevice + 100) setAudioDevice(cmd == kDevice ? nullptr : &devices[cmd - kDevice - 1]);
+        else if (cmd >= kGlitch && cmd < kGlitch + 5) { glitchFilter = cmd - kGlitch; overlay.ShowMessage(kGlitchNames[glitchFilter], 1.5f); }
+        else if (cmd >= kScene && cmd < kScene + 3) setSceneChanges(cmd - kScene);
+        else if (cmd >= kViz && cmd < kViz + 100) { if (static_cast<int>(cmd - kViz) != host.Current()) { host.Select(cmd - kViz); announce(); } }
+        else window.onKeyDown(cmd);   // everything else is the key it's labelled with
+    };
+
     FrameLimiter limiter;
     HMONITOR currentMonitor = nullptr;
     double displayFps = 60.0;
@@ -389,7 +529,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     };
     updateMonitor();
 
-    overlay.ShowMessage(std::wstring(host.Active().Name()) + L"   ·   press H for help", 4.0f);
+    overlay.ShowMessage(std::wstring(host.Active().Name()) + L"   ·   right-click for the menu, H for help", 4.0f);
     if (justUpdated) overlay.ShowMessage(std::wstring(L"Updated to version ") + Updater::CurrentVersion(), 4.0f);
     if (settings.autoUpdate) settings.lastUpdateCheck = updater.Start(settings.lastUpdateCheck, false);
 
@@ -454,16 +594,33 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             if (newTrack || newPalette) applyPalette(newTrack);
             // Auto-cycle: a new visualiser with each new song (not for the song already
             // playing when the app starts).
-            if (newTrack && autoCycle && track.trackSerial > 1) {
+            if (newTrack && sceneChanges == 1 && track.trackSerial > 1) {
                 host.SelectRandom();
                 host.ShuffleExtras();
                 sinceSwitch = 0.0f;
             }
         }
         sinceSwitch += dt;
-        if (autoCycle && sinceSwitch > kAutoCycleSeconds && !audio.silent) {
+        if (sceneChanges == 1 && sinceSwitch > kAutoCycleSeconds && !audio.silent) {
             host.SelectRandom();
             announce();
+        }
+        // Random: after about a minute, switch at the start of the next 8-bar phrase, or on a drop if one comes
+        // first (unless the drop is the current scene's own big moment), never in the middle of a set piece.
+        const bool onDownbeat = audio.barPhase < lastBarPhase;
+        lastBarPhase = audio.barPhase;
+        const bool gridLocked = audio.tempoConfidence > 0.4f;
+        if (onDownbeat && gridLocked) ++barsSinceSwitch;
+        const bool newDrop = audio.dropCount != seenRandomDrop;
+        seenRandomDrop = audio.dropCount;
+        if (sceneChanges == 2 && !audio.silent) {
+            bool dropMoment = false;
+            for (const VisualizerAction& a : host.Active().Actions()) dropMoment |= a.key == 'Q';
+            bool go = sinceSwitch > kRandomSeconds && (gridLocked ? onDownbeat && barsSinceSwitch % 8 == 0 : true);
+            go |= newDrop && !dropMoment && sinceSwitch > kRandomSeconds * 0.7f;
+            go |= sinceSwitch > kRandomSeconds * 1.5f;
+            if (host.Active().Busy() && sinceSwitch < kRandomSeconds * 2.5f) go = false;
+            if (go) randomScene();
         }
 
         // --- Visuals ---
@@ -529,6 +686,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
                     stats.visualizer = host.Active().Name();
                     stats.visualizerStatus = host.Active().Status();
                 }
+                if (showHelp) overlay.SetHelpExtras(host.Active().Name(), host.Active().Actions());
                 overlay.Draw(d2d, primary.right - primary.left, primary.bottom - primary.top, stats, audio, showStats, showHelp,
                              eqBars.Visible() ? 230.0f : 0.0f, static_cast<float>(primary.left), static_cast<float>(primary.top));
                 renderer.EndOverlay();

@@ -8,24 +8,12 @@ namespace {
 // Layout is authored for a 1080p-high window and scaled to the real size.
 constexpr float kDesignHeight = 1080.0f;
 
+// The keys worth remembering; everything else is in the right-click menu, with its key alongside.
 const wchar_t* const kHelpLines[][2] = {
-    { L"←  →", L"Previous / next visualiser" },
-    { L"C", L"Auto-cycle: new visualiser with each song" },
-    { L"F  or  Alt+Enter", L"Toggle fullscreen (or double-click)" },
-    { L"N", L"Next look (colours and shapes)" },
-    { L"Space", L"Lock / unlock the current look" },
-    { L"B", L"Equaliser bars along the bottom" },
-    { L"W  /  G", L"Multi-monitor mode  /  next monitor" },
-    { L"K  /  X", L"Mood colour on / off  /  glitch filter" },
-    { L"O", L"Stream mode: clean / bars on green / off" },
-    { L"D", L"Cycle audio device" },
-    { L"A", L"Album-art colours on / off" },
-    { L"T", L"Track titles on / off" },
-    { L"R", L"Record to MP4 (again to stop and save)" },
-    { L"I  /  S", L"Instant replay on / off  /  save last 30 s" },
-    { L"V", L"Choose where videos are saved" },
-    { L"U", L"Check for updates  /  install a downloaded one" },
-    { L"F1", L"Stats" },
+    { L"Right-click", L"The menu: every setting" },
+    { L"\u2190  \u2192", L"Previous / next visualiser" },
+    { L"C", L"Scene changes: off / each song / random" },
+    { L"F  or  double-click", L"Fullscreen" },
     { L"H", L"This help" },
     { L"Esc", L"Leave fullscreen / quit" },
 };
@@ -214,7 +202,8 @@ void Overlay::DrawStats(ID2D1DeviceContext* ctx, const OverlayStats& s, const Au
 void Overlay::DrawHelp(ID2D1DeviceContext* ctx, float width, float height) {
     const float rowH = 36.0f;
     const float panelW = 800.0f;
-    const float panelH = 110.0f + rowH * ARRAYSIZE(kHelpLines);
+    const float extraH = m_helpActions.empty() ? 0.0f : 30.0f + rowH * (1 + m_helpActions.size());
+    const float panelH = 150.0f + rowH * ARRAYSIZE(kHelpLines) + extraH;
     const D2D1_RECT_F panel = D2D1::RectF((width - panelW) / 2, (height - panelH) / 2,
                                           (width + panelW) / 2, (height + panelH) / 2);
     m_brush->SetColor(D2D1::ColorF(0.02f, 0.02f, 0.05f, 0.8f));
@@ -226,4 +215,18 @@ void Overlay::DrawHelp(ID2D1DeviceContext* ctx, float width, float height) {
         DrawText(ctx, line[1], m_bodyFormat.Get(), D2D1::RectF(panel.left + 280, y, panel.right - 30, y + rowH), 1.0f);
         y += rowH;
     }
+    if (!m_helpActions.empty()) {
+        y += 30;
+        DrawText(ctx, m_helpName, m_bodyFormat.Get(), D2D1::RectF(panel.left + 50, y, panel.right - 30, y + rowH), 0.55f);
+        y += rowH;
+        for (const VisualizerAction& act : m_helpActions) {
+            const std::wstring key = act.key == VK_SPACE ? std::wstring(L"Space") : std::wstring(1, static_cast<wchar_t>(act.key));
+            DrawText(ctx, key, m_bodyFormat.Get(), D2D1::RectF(panel.left + 50, y, panel.left + 280, y + rowH), 0.75f);
+            DrawText(ctx, act.label, m_bodyFormat.Get(), D2D1::RectF(panel.left + 280, y, panel.right - 30, y + rowH), 1.0f);
+            y += rowH;
+        }
+    }
+    y += 20;
+    DrawText(ctx, L"Every other setting and key is in the right-click menu.", m_bodyFormat.Get(),
+             D2D1::RectF(panel.left + 50, y, panel.right - 30, y + rowH), 0.55f);
 }

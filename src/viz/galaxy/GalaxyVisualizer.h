@@ -30,6 +30,10 @@ public:
     void Update(const AudioFeatures& audio, float dt) override;
     void Render(Renderer& renderer, float time, float dt) override;
     bool OnKey(UINT vk) override;
+    std::vector<VisualizerAction> Actions() const override {
+        return { { 'N', L"Next look" }, { 'M', L"Next camera shot" }, { 'Q', L"Fire the quasar" }, { VK_SPACE, L"Lock / unlock the look" } };
+    }
+    bool Busy() const override { return m_quasar > 0.5f; }
     std::wstring TakeMessage() override;
     std::wstring Status() const override;
     void AccentColours(float lo[3], float hi[3]) const override;

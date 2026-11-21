@@ -1,6 +1,7 @@
 #include "platform/Settings.h"
 
 #include <shlobj.h>
+#include <algorithm>
 #include <cwchar>
 
 namespace {
@@ -56,7 +57,7 @@ void Settings::Load() {
     showBars = ReadInt(file, L"ShowBars", 0) != 0;
     albumColours = ReadInt(file, L"AlbumColours", 1) != 0;
     trackTitles = ReadInt(file, L"TrackTitles", 1) != 0;
-    autoCycle = ReadInt(file, L"AutoCycle", 0) != 0;
+    sceneChanges = std::clamp(ReadInt(file, L"AutoCycle", 0), 0, 2);
     instantReplay = ReadInt(file, L"InstantReplay", 0) != 0;
     moodColour = ReadInt(file, L"MoodColour", 1) != 0;
     glitchFilter = ReadInt(file, L"GlitchFilter", 0);
@@ -84,7 +85,7 @@ void Settings::Save() const {
     WriteInt(file, L"ShowBars", showBars ? 1 : 0);
     WriteInt(file, L"AlbumColours", albumColours ? 1 : 0);
     WriteInt(file, L"TrackTitles", trackTitles ? 1 : 0);
-    WriteInt(file, L"AutoCycle", autoCycle ? 1 : 0);
+    WriteInt(file, L"AutoCycle", sceneChanges);
     WriteInt(file, L"InstantReplay", instantReplay ? 1 : 0);
     WriteInt(file, L"MoodColour", moodColour ? 1 : 0);
     WriteInt(file, L"GlitchFilter", glitchFilter);

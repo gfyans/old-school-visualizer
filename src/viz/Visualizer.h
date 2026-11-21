@@ -2,11 +2,18 @@
 #include <windows.h>
 #include <d3d11.h>
 #include <string>
+#include <vector>
 #include "audio/AudioFeatures.h"
 
 #include "media/TrackPalette.h"
 
 class Renderer;
+
+// One of a visualiser's own keys, for the right-click menu and the help screen.
+struct VisualizerAction {
+    UINT key;
+    const wchar_t* label;
+};
 
 // The plug-in contract. To add a visualiser: implement this, then register it in
 // main.cpp (RegisterVisualizers). The host owns an offscreen target per visualiser,
@@ -37,6 +44,22 @@ public:
 
     // Optional per-visualiser keys (e.g. N = next look, Space = lock). Return true if handled.
     virtual bool OnKey(UINT /*vk*/) { return false; }
+
+    // The keys OnKey handles, with what they do (shown in the menu and the help screen).
+    virtual std::vector<VisualizerAction> Actions() const { return {}; }
+
+    // Random mode: jump to a random look and mode before being shown. By default this presses the
+    // visualiser's own "next look" (N) a few times and "next shot / layout" (M) half the time.
+    virtual void Randomise(uint32_t seed) {
+        bool hasN = false, hasM = false;
+        for (const VisualizerAction& a : Actions()) { hasN |= a.key == 'N'; hasM |= a.key == 'M'; }
+        if (hasN) for (uint32_t i = 0, n = 1 + seed % 3; i < n; ++i) OnKey('N');
+        if (hasM && (seed & 8)) OnKey('M');
+        TakeMessage();   // quietly
+    }
+
+    // True while a set piece is playing (a blast, a supernova…) that Random mode shouldn't cut off.
+    virtual bool Busy() const { return false; }
 
     // Optional one-off notification to show on screen (e.g. "Look locked"); cleared when read.
     virtual std::wstring TakeMessage() { return {}; }

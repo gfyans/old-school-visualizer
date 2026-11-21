@@ -45,10 +45,14 @@ And it fits around you:
 
 ## Keys
 
+Right-click anywhere (or press the menu key) for a menu with every setting, each with its key alongside, so
+there's nothing to remember. `H` shows the few keys worth knowing plus the current visualiser's own.
+
 | Key | Action |
 |---|---|
+| Right-click | The menu: visualiser, scene changes, the visualiser's own actions, effects, display, audio device, recording |
 | `←` `→` | Previous / next visualiser (with a random transition: crossfade, glitch cut, zoom-through, iris or pixel dissolve) |
-| `C` | Auto-cycle: a new visualiser with each song (or every 4 minutes without track info) |
+| `C` | Scene changes: off → a new visualiser with each song (or every 4 minutes without track info) → **Random**: a random visualiser and look about every minute, switched at the start of a phrase or on a drop, never in the middle of a blast, supernova or quasar |
 | `F`, `Alt+Enter`, double-click | Toggle fullscreen |
 | `N` | Next look (Nebula: palette + gas shape; Neon Grid / Aurora: colour scheme; Liquid: preset; Oscilloscope: mode; Galaxy: shape + colours; Fractal flights: world; Signal: subject, style + palette; Detonation: Night / Ink / Dusk) |
 | `Space` | Lock / unlock the current look |

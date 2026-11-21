@@ -201,9 +201,45 @@ LRESULT Window::WndProc(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_SETCURSOR:
-        if (m_fullscreen && LOWORD(lp) == HTCLIENT) {
+        // Fullscreen hides the pointer, until the mouse moves (so the right-click menu can be found).
+        if (m_fullscreen && LOWORD(lp) == HTCLIENT && GetTickCount64() - m_lastMouseMove > kCursorHideMs) {
             SetCursor(nullptr);
             return TRUE;
+        }
+        break;
+
+    case WM_MOUSEMOVE: {
+        const POINT pt{ static_cast<short>(LOWORD(lp)), static_cast<short>(HIWORD(lp)) };
+        if (pt.x != m_lastMousePos.x || pt.y != m_lastMousePos.y) {   // ignore the synthetic moves Windows sends
+            m_lastMousePos = pt;
+            m_lastMouseMove = GetTickCount64();
+            SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+            SetTimer(m_hwnd, kCursorTimer, kCursorHideMs + 100, nullptr);
+        }
+        return 0;
+    }
+
+    case WM_TIMER:
+        if (wp == kCursorTimer) {
+            KillTimer(m_hwnd, kCursorTimer);
+            POINT pt;
+            GetCursorPos(&pt);
+            if (m_fullscreen && WindowFromPoint(pt) == m_hwnd) SetCursor(nullptr);
+            return 0;
+        }
+        break;
+
+    case WM_CONTEXTMENU:
+        if (onContextMenu) {
+            POINT pt{ static_cast<short>(LOWORD(lp)), static_cast<short>(HIWORD(lp)) };
+            if (pt.x == -1 && pt.y == -1) {   // from the keyboard (menu key, Shift+F10): the middle of the window
+                RECT rc;
+                GetClientRect(m_hwnd, &rc);
+                pt = { rc.right / 2, rc.bottom / 3 };
+                ClientToScreen(m_hwnd, &pt);
+            }
+            onContextMenu(pt);
+            return 0;
         }
         break;
 

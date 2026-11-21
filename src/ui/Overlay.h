@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <string>
 
+#include <vector>
 #include "audio/AudioFeatures.h"
+#include "viz/Visualizer.h"
 
 struct OverlayStats {
     int fps = 0;
@@ -34,6 +36,8 @@ public:
     void ShowTrack(const std::wstring& title, const std::wstring& artist, float seconds = 7.0f);
     // A persistent status in the top-right corner (e.g. "REC 0:42"); empty hides it.
     void SetIndicator(const std::wstring& text, bool recording) { m_indicator = text; m_indicatorRec = recording; }
+    // The help panel's second part: the visualiser on screen and its own keys.
+    void SetHelpExtras(const std::wstring& name, const std::vector<VisualizerAction>& actions) { m_helpName = name; m_helpActions = actions; }
     void ClearTransient() { m_message.clear(); m_trackTitle.clear(); }   // drop messages and captions now
     void Update(float dt);
     bool HasContent(bool stats, bool help) const;
@@ -54,6 +58,8 @@ private:
     Microsoft::WRL::ComPtr<IDWriteTextFormat> m_trackFormat, m_artistFormat;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_brush;
 
+    std::wstring m_helpName;
+    std::vector<VisualizerAction> m_helpActions;
     std::wstring m_indicator;
     bool m_indicatorRec = false;
     std::wstring m_message;

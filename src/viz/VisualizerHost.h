@@ -28,6 +28,7 @@ public:
     int Current() const { return m_current; }
     int FindByName(const std::wstring& name) const;
     IVisualizer& Active() { return *m_slots[m_current].viz; }
+    IVisualizer& At(int index) { return *m_slots[index].viz; }
     const IVisualizer& Active() const { return *m_slots[m_current].viz; }
 
     void Update(const AudioFeatures& audio, float dt);
