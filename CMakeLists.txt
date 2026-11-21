@@ -133,6 +133,12 @@ target_link_libraries(vis_replay PRIVATE audio_analysis)
 target_compile_definitions(vis_replay PRIVATE ${COMMON_DEFS})
 target_compile_options(vis_replay PRIVATE ${COMMON_OPTS})
 
+# Checks a recorded video's audio for dropouts (record a steady tone)
+add_executable(vis_mp4check tools/mp4check/mp4check.cpp)
+target_link_libraries(vis_mp4check PRIVATE mfplat mfreadwrite mfuuid ole32)
+target_compile_definitions(vis_mp4check PRIVATE ${COMMON_DEFS})
+target_compile_options(vis_mp4check PRIVATE ${COMMON_OPTS})
+
 add_executable(capture_probe tests/capture_probe.cpp src/audio/AudioCapture.cpp)
 target_include_directories(capture_probe PRIVATE src)
 target_link_libraries(capture_probe PRIVATE ole32)

@@ -4,6 +4,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <mutex>
 #include <string>
@@ -21,9 +22,11 @@ class Renderer;
 //
 // How: each frame (before on-screen text) is scaled to the recording size on the GPU and read
 // back a couple of frames later so nothing stalls. An encoder thread pulls the loopback audio
-// straight from AudioCapture, resamples it to 48 kHz stereo, and encodes both into 10-second
-// MP4 segments in %TEMP%. Saving joins the segments it needs into one file without re-encoding
-// (on a worker thread). Files go to Videos\Visualizer.
+// straight from AudioCapture and resamples it to 48 kHz stereo. Video goes into 10-second MP4
+// segments in %TEMP%, each with its stretch of audio kept as raw PCM. Saving joins the video
+// segments without re-encoding and encodes the audio once, end to end (separately encoded AAC
+// pieces would each start with a little encoder silence: an audible gap at every join).
+// Files go to Videos\Visualizer or the chosen folder.
 class Recorder {
 public:
     Recorder() = default;
@@ -59,7 +62,9 @@ public:
 private:
     struct Frame { std::vector<uint8_t> pixels; int64_t time = 0; };   // NV12; time: 100 ns since session start
     struct Segment {
-        std::wstring path;
+        std::wstring path;            // video (MP4, H.264 only)
+        std::wstring pcmPath;         // its audio: raw 48 kHz 16-bit stereo, continuing from the previous segment
+        int64_t audioFrame0 = 0, audioFrames = 0;   // first audio frame (session count) and how many
         int64_t start = 0, end = 0;   // session time, 100 ns
         bool recording = false;       // part of the current/last recording
         int inUse = 0;                // being joined into a saved file
@@ -74,7 +79,8 @@ private:
     void StopSession();
     bool OpenSegment(int64_t start);
     void CloseSegment(int64_t end);
-    void PullAudio(int64_t now);
+    void AudioMain();                 // reads the capture ring every 5 ms into m_pcmQueue
+    void DrainAudio();                // encoder thread: queued audio -> the segment's PCM file
     void WriteVideo(Frame& frame);
     void Prune(int64_t now);
     void Join(std::vector<Segment> segments, int64_t from, std::wstring outPath);
@@ -112,15 +118,19 @@ private:
     std::atomic<int64_t> m_recordStartQpc{ 0 };
     std::vector<std::thread> m_joiners;
 
+    // --- audio thread (never blocked by encoding, so the capture ring can't overflow) ---
+    std::thread m_audioThread;
+    std::mutex m_pcmMutex;            // guards m_pcmQueue
+    std::vector<int16_t> m_pcmQueue;  // 48 kHz stereo, waiting for the encoder thread
+    std::atomic<bool> m_audioReset{ false }, m_audioActive{ false };
+
     // --- encoder thread ---
     struct Writer;                    // IMFSinkWriter wrapper (keeps MF headers out of here)
     Writer* m_writer = nullptr;
+    FILE* m_pcm = nullptr;            // the current segment's audio
     std::vector<Segment> m_segments;  // oldest first; the last one is being written
     bool m_recordingActive = false;
     int64_t m_recordingFrom = 0;
-    uint64_t m_audioIndex = 0;        // next capture sample to read
-    double m_audioPos = 0.0;          // resampler position (source samples)
-    float m_lastL = 0.0f, m_lastR = 0.0f;
     int64_t m_audioOut = 0;           // 48 kHz frames written this session
     int64_t m_segmentStart = 0;
     bool m_wroteVideo = false;

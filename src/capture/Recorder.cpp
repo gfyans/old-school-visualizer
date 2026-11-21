@@ -75,12 +75,13 @@ bool Recorder::Init(const AudioCapture* audio) {
     m_tempDir = std::wstring(temp) + L"Visualizer";
     CreateDirectoryW(m_tempDir.c_str(), nullptr);
     WIN32_FIND_DATAW fd;
-    HANDLE find = FindFirstFileW((m_tempDir + L"\\segment-*.mp4").c_str(), &fd);
+    HANDLE find = FindFirstFileW((m_tempDir + L"\\segment-*").c_str(), &fd);
     if (find != INVALID_HANDLE_VALUE) {
         do { DeleteFileW((m_tempDir + L"\\" + fd.cFileName).c_str()); } while (FindNextFileW(find, &fd));
         FindClose(find);
     }
     m_thread = std::thread(&Recorder::EncoderMain, this);
+    m_audioThread = std::thread(&Recorder::AudioMain, this);
     return true;
 }
 
@@ -93,9 +94,10 @@ void Recorder::Shutdown() {
         m_wake.notify_all();
         m_thread.join();
     }
+    if (m_audioThread.joinable()) m_audioThread.join();   // it watches m_quit too
     for (std::thread& t : m_joiners) if (t.joinable()) t.join();
     m_joiners.clear();
-    for (const Segment& s : m_segments) DeleteFileW(s.path.c_str());
+    for (const Segment& s : m_segments) { DeleteFileW(s.path.c_str()); DeleteFileW(s.pcmPath.c_str()); }
     m_segments.clear();
     ReleaseDeviceResources();
     if (m_mfStarted) { MFShutdown(); m_mfStarted = false; }
@@ -385,9 +387,11 @@ void Recorder::EncoderMain() {
         if (m_recordWanted.load() && !m_recordingActive) {
             m_recordingActive = true;
             m_recordingFrom = now;
+            DrainAudio();
             CloseSegment(now);
             OpenSegment(now);
         } else if (!m_recordWanted.load() && m_recordingActive) {
+            DrainAudio();
             CloseSegment(now);
             m_recordingActive = false;
             std::vector<Segment> parts;
@@ -403,9 +407,10 @@ void Recorder::EncoderMain() {
             continue;
         }
 
-        PullAudio(now);
+        DrainAudio();
         for (Frame& f : frames) {
             if (f.time - m_segmentStart >= kSegmentLength && m_wroteVideo) {
+                DrainAudio();
                 CloseSegment(f.time);
                 OpenSegment(f.time);
                 if (!m_writer) break;
@@ -414,6 +419,7 @@ void Recorder::EncoderMain() {
         }
 
         if (save && m_replayWanted.load() && m_writer) {
+            DrainAudio();
             CloseSegment(now);
             std::vector<Segment> parts;
             for (Segment& s : m_segments)
@@ -436,10 +442,13 @@ void Recorder::EncoderMain() {
 bool Recorder::StartSession() {
     m_segments.clear();
     m_recordingActive = false;
-    m_audioIndex = m_audio ? m_audio->TotalSamples() : 0;
-    m_audioPos = 0.0;
-    m_lastL = m_lastR = 0.0f;
     m_audioOut = 0;
+    {
+        std::lock_guard lock(m_pcmMutex);
+        m_pcmQueue.clear();
+    }
+    m_audioReset.store(true);   // the audio thread restarts its stream at this moment
+    m_audioActive.store(true);
     if (!OpenSegment(0)) {
         Post(L"Recording isn't available: no H.264 video encoder found");
         return false;
@@ -448,9 +457,10 @@ bool Recorder::StartSession() {
 }
 
 void Recorder::StopSession() {
-    if (m_writer) CloseSegment(Now());
+    m_audioActive.store(false);
+    if (m_writer) { DrainAudio(); CloseSegment(Now()); }
     for (const Segment& s : m_segments)
-        if (s.inUse == 0) DeleteFileW(s.path.c_str());
+        if (s.inUse == 0) { DeleteFileW(s.path.c_str()); DeleteFileW(s.pcmPath.c_str()); }
     std::lock_guard lock(m_mutex);
     m_segments.erase(std::remove_if(m_segments.begin(), m_segments.end(), [](const Segment& s) { return s.inUse == 0; }),
                      m_segments.end());
@@ -470,7 +480,7 @@ bool Recorder::OpenSegment(int64_t start) {
     const UINT32 width = static_cast<UINT32>(m_session.width), height = static_cast<UINT32>(m_session.height);
     const UINT32 bitrate = std::clamp(static_cast<UINT32>(double(width) * height * kFps * 0.1), 4'000'000u, 24'000'000u);
 
-    ComPtr<IMFMediaType> vOut, vIn, aOut, aIn;
+    ComPtr<IMFMediaType> vOut, vIn;
     bool ok = SUCCEEDED(MFCreateSinkWriterFromURL(path.c_str(), nullptr, attrs.Get(), &w->sink));
     // Video: NV12 frames in (converted on the GPU), H.264 out.
     ok = ok && SUCCEEDED(MFCreateMediaType(&vOut));
@@ -504,29 +514,6 @@ bool Recorder::OpenSegment(int64_t start) {
         MFSetAttributeRatio(vIn.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
         ok = SUCCEEDED(w->sink->SetInputMediaType(w->video, vIn.Get(), nullptr));
     }
-    // Audio: 48 kHz 16-bit stereo PCM in, AAC (192 kbps) out.
-    ok = ok && SUCCEEDED(MFCreateMediaType(&aOut));
-    if (ok) {
-        aOut->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-        aOut->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC);
-        aOut->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-        aOut->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, kAudioRate);
-        aOut->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2);
-        aOut->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 24000);
-        aOut->SetUINT32(MF_MT_AAC_PAYLOAD_TYPE, 0);
-        ok = SUCCEEDED(w->sink->AddStream(aOut.Get(), &w->audio));
-    }
-    ok = ok && SUCCEEDED(MFCreateMediaType(&aIn));
-    if (ok) {
-        aIn->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-        aIn->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
-        aIn->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-        aIn->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, kAudioRate);
-        aIn->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2);
-        aIn->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 4);
-        aIn->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, kAudioRate * 4);
-        ok = SUCCEEDED(w->sink->SetInputMediaType(w->audio, aIn.Get(), nullptr));
-    }
     if (ok) {
         // A keyframe every 2 s, so saved clips can start close to where they're asked to.
         ComPtr<ICodecAPI> codec;
@@ -538,16 +525,22 @@ bool Recorder::OpenSegment(int64_t start) {
         }
         ok = SUCCEEDED(w->sink->BeginWriting());
     }
+    const std::wstring pcmPath = path.substr(0, path.size() - 4) + L".pcm";
+    FILE* pcm = nullptr;
+    if (ok && (_wfopen_s(&pcm, pcmPath.c_str(), L"wb") != 0 || !pcm)) ok = false;
     if (!ok) {
         delete w;
         DeleteFileW(path.c_str());
         return false;
     }
     m_writer = w;
+    m_pcm = pcm;
     m_segmentStart = start;
     m_wroteVideo = false;
     Segment seg;
     seg.path = path;
+    seg.pcmPath = pcmPath;
+    seg.audioFrame0 = m_audioOut;
     seg.start = seg.end = start;
     seg.recording = m_recordingActive;
     std::lock_guard lock(m_mutex);
@@ -562,63 +555,82 @@ void Recorder::CloseSegment(int64_t end) {
     m_writer->sink.Reset();
     delete m_writer;
     m_writer = nullptr;
+    if (m_pcm) { fclose(m_pcm); m_pcm = nullptr; }
     std::lock_guard lock(m_mutex);
     if (m_segments.empty()) return;
     Segment& seg = m_segments.back();
     seg.end = end;
+    seg.audioFrames = m_audioOut - seg.audioFrame0;
     if (!ok) {
         DeleteFileW(seg.path.c_str());
+        DeleteFileW(seg.pcmPath.c_str());
         m_segments.pop_back();
     }
 }
 
-void Recorder::PullAudio(int64_t now) {
-    if (!m_audio) return;
+// Audio thread: every 5 ms, everything new in the capture ring is resampled from the device rate
+// (e.g. 96 kHz) to 48 kHz stereo and queued. If the ring ever overflowed, the missing stretch is
+// filled with silence so the sound stays in step with the picture.
+void Recorder::AudioMain() {
     float mono[4096], side[4096];
-    int16_t out[4096 * 2];
+    std::vector<int16_t> out;
+    out.reserve(4096 * 2);
+    uint64_t index = 0;
+    double pos = 0.0;
+    float lastL = 0.0f, lastR = 0.0f;
     for (;;) {
-        const size_t n = m_audio->ReadSince(m_audioIndex, mono, side, 4096);
-        if (n == 0) break;
-        // Linear resampling from the device rate (e.g. 96 kHz) to 48 kHz. Position 0 is the last
-        // sample of the previous block, position k is mono[k - 1].
-        const double step = double(m_audio->SampleRate()) / kAudioRate;
-        size_t produced = 0;
-        while (m_audioPos < double(n) && produced < 4096) {
-            const size_t i0 = static_cast<size_t>(m_audioPos);
-            const float f = static_cast<float>(m_audioPos - i0);
-            const float l0 = i0 == 0 ? m_lastL : mono[i0 - 1] + side[i0 - 1];
-            const float r0 = i0 == 0 ? m_lastR : mono[i0 - 1] - side[i0 - 1];
-            const float l1 = mono[i0] + side[i0], r1 = mono[i0] - side[i0];
-            const float l = l0 + (l1 - l0) * f, r = r0 + (r1 - r0) * f;
-            out[produced * 2] = static_cast<int16_t>(std::clamp(l, -1.0f, 1.0f) * 32767.0f);
-            out[produced * 2 + 1] = static_cast<int16_t>(std::clamp(r, -1.0f, 1.0f) * 32767.0f);
-            ++produced;
-            m_audioPos += step;
+        {
+            std::unique_lock lock(m_mutex);
+            if (m_wake.wait_for(lock, std::chrono::milliseconds(5), [&] { return m_quit; })) break;
         }
-        m_audioPos -= double(n);
-        m_lastL = mono[n - 1] + side[n - 1];
-        m_lastR = mono[n - 1] - side[n - 1];
-        if (produced == 0) continue;
-
-        const int64_t t = m_audioOut * kSecond / kAudioRate;
-        const int64_t duration = int64_t(produced) * kSecond / kAudioRate;
-        m_audioOut += produced;
-        if (t + duration < m_segmentStart) continue;
-        ComPtr<IMFMediaBuffer> buffer;
-        ComPtr<IMFSample> sample;
-        BYTE* data = nullptr;
-        const DWORD bytes = static_cast<DWORD>(produced * 4);
-        if (FAILED(MFCreateMemoryBuffer(bytes, &buffer)) || FAILED(buffer->Lock(&data, nullptr, nullptr))) continue;
-        memcpy(data, out, bytes);
-        buffer->Unlock();
-        buffer->SetCurrentLength(bytes);
-        if (FAILED(MFCreateSample(&sample))) continue;
-        sample->AddBuffer(buffer.Get());
-        sample->SetSampleTime(std::max<int64_t>(0, t - m_segmentStart));
-        sample->SetSampleDuration(duration);
-        m_writer->sink->WriteSample(m_writer->audio, sample.Get());
+        if (!m_audio || !m_audioActive.load()) continue;
+        if (m_audioReset.exchange(false)) {
+            index = m_audio->TotalSamples();
+            pos = 0.0;
+            lastL = lastR = 0.0f;
+        }
+        for (;;) {
+            const uint64_t before = index;
+            const size_t n = m_audio->ReadSince(index, mono, side, 4096);
+            const uint64_t skipped = index - n - before;   // overflowed: fill the hole with silence
+            const double step = double(m_audio->SampleRate()) / kAudioRate;
+            out.clear();
+            if (skipped > 0) out.resize(size_t(double(skipped) / step) * 2, 0);
+            if (n == 0 && out.empty()) break;
+            // Linear interpolation; position 0 is the last sample of the previous block.
+            while (pos < double(n)) {
+                const size_t i0 = static_cast<size_t>(pos);
+                const float f = static_cast<float>(pos - i0);
+                const float l0 = i0 == 0 ? lastL : mono[i0 - 1] + side[i0 - 1];
+                const float r0 = i0 == 0 ? lastR : mono[i0 - 1] - side[i0 - 1];
+                const float l1 = mono[i0] + side[i0], r1 = mono[i0] - side[i0];
+                out.push_back(static_cast<int16_t>(std::clamp(l0 + (l1 - l0) * f, -1.0f, 1.0f) * 32767.0f));
+                out.push_back(static_cast<int16_t>(std::clamp(r0 + (r1 - r0) * f, -1.0f, 1.0f) * 32767.0f));
+                pos += step;
+            }
+            if (n > 0) {
+                pos -= double(n);
+                lastL = mono[n - 1] + side[n - 1];
+                lastR = mono[n - 1] - side[n - 1];
+            }
+            std::lock_guard lock(m_pcmMutex);
+            m_pcmQueue.insert(m_pcmQueue.end(), out.begin(), out.end());
+            if (n == 0) break;
+        }
     }
-    (void)now;
+}
+
+// Encoder thread: whatever audio has arrived goes into the current segment's PCM file.
+void Recorder::DrainAudio() {
+    std::vector<int16_t> chunk;
+    {
+        std::lock_guard lock(m_pcmMutex);
+        chunk.swap(m_pcmQueue);
+    }
+    const size_t frames = chunk.size() / 2;
+    if (frames == 0) return;
+    if (m_pcm) fwrite(chunk.data(), 4, frames, m_pcm);
+    m_audioOut += frames;
 }
 
 void Recorder::WriteVideo(Frame& frame) {
@@ -649,12 +661,14 @@ void Recorder::Prune(int64_t now) {
         const bool keep = s.recording || s.inUse > 0 || (replay && s.end > keepFrom);
         if (keep) { ++i; continue; }
         DeleteFileW(s.path.c_str());
+        DeleteFileW(s.pcmPath.c_str());
         m_segments.erase(m_segments.begin() + i);
     }
 }
 
-// Joins segments into one MP4 without re-encoding, starting at the first keyframe at or after
-// `from` (session time). Runs on its own thread.
+// Joins segments into one MP4, starting at the first keyframe at or after `from` (session time):
+// the video is copied as it is; the audio is encoded once from the segments' raw PCM, so it runs
+// on without a break. Runs on its own thread.
 void Recorder::Join(std::vector<Segment> segments, int64_t from, std::wstring outPath) {
     m_joiners.emplace_back([this, segments = std::move(segments), from, outPath = std::move(outPath)] {
         CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -662,60 +676,95 @@ void Recorder::Join(std::vector<Segment> segments, int64_t from, std::wstring ou
         DWORD outVideo = 0, outAudio = 0;
         bool started = false, wrote = false;
         int64_t base = 0, lastVideo = -1;
+        int64_t audioFrom = 0, audioWritten = 0;   // first audio frame used (session count), frames written
+        std::vector<int16_t> pcm(size_t(kAudioRate / 10) * 2);   // 100 ms at a time
         for (const Segment& seg : segments) {
             ComPtr<IMFSourceReader> reader;
             if (FAILED(MFCreateSourceReaderFromURL(seg.path.c_str(), nullptr, &reader))) continue;
-            DWORD vIn = MAXDWORD, aIn = MAXDWORD;
-            ComPtr<IMFMediaType> vType, aType;
-            for (DWORD i = 0;; ++i) {
-                ComPtr<IMFMediaType> type;
-                if (FAILED(reader->GetNativeMediaType(i, 0, &type))) break;
-                GUID major{};
-                type->GetGUID(MF_MT_MAJOR_TYPE, &major);
-                if (major == MFMediaType_Video && vIn == MAXDWORD) { vIn = i; vType = type; }
-                else if (major == MFMediaType_Audio && aIn == MAXDWORD) { aIn = i; aType = type; }
-            }
-            if (vIn == MAXDWORD || aIn == MAXDWORD) continue;
+            ComPtr<IMFMediaType> vType;
+            if (FAILED(reader->GetNativeMediaType(0, 0, &vType))) continue;
             if (!out) {
-                if (FAILED(MFCreateSinkWriterFromURL(outPath.c_str(), nullptr, nullptr, &out)) ||
+                ComPtr<IMFMediaType> aOut, aIn;
+                MFCreateMediaType(&aOut);
+                aOut->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+                aOut->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC);
+                aOut->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+                aOut->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, kAudioRate);
+                aOut->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2);
+                aOut->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 24000);   // 192 kbps
+                aOut->SetUINT32(MF_MT_AAC_PAYLOAD_TYPE, 0);
+                MFCreateMediaType(&aIn);
+                aIn->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+                aIn->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
+                aIn->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+                aIn->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, kAudioRate);
+                aIn->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2);
+                aIn->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 4);
+                aIn->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, kAudioRate * 4);
+                // No throttling: each segment's video is written before its audio, and a throttled
+                // writer would wait for audio to catch up that only comes afterwards.
+                ComPtr<IMFAttributes> attrs;
+                MFCreateAttributes(&attrs, 1);
+                attrs->SetUINT32(MF_SINK_WRITER_DISABLE_THROTTLING, TRUE);
+                if (FAILED(MFCreateSinkWriterFromURL(outPath.c_str(), nullptr, attrs.Get(), &out)) ||
                     FAILED(out->AddStream(vType.Get(), &outVideo)) || FAILED(out->SetInputMediaType(outVideo, vType.Get(), nullptr)) ||
-                    FAILED(out->AddStream(aType.Get(), &outAudio)) || FAILED(out->SetInputMediaType(outAudio, aType.Get(), nullptr)) ||
+                    FAILED(out->AddStream(aOut.Get(), &outAudio)) || FAILED(out->SetInputMediaType(outAudio, aIn.Get(), nullptr)) ||
                     FAILED(out->BeginWriting())) {
                     out.Reset();
                     break;
                 }
             }
+            // This segment's video.
             for (;;) {
                 DWORD stream = 0, flags = 0;
                 LONGLONG ts = 0;
                 ComPtr<IMFSample> sample;
-                if (FAILED(reader->ReadSample(static_cast<DWORD>(MF_SOURCE_READER_ANY_STREAM), 0, &stream, &flags, &ts, &sample))) break;
-                if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
-                    if (stream == vIn) vIn = MAXDWORD - 1;   // mark ended
-                    if (stream == aIn) aIn = MAXDWORD - 1;
-                    if (vIn == MAXDWORD - 1 && aIn == MAXDWORD - 1) break;
-                    continue;
-                }
+                if (FAILED(reader->ReadSample(0, 0, &stream, &flags, &ts, &sample))) break;
+                if (flags & MF_SOURCE_READERF_ENDOFSTREAM) break;
                 if (!sample) continue;
                 const int64_t t = seg.start + ts;
-                if (stream == vIn) {
-                    if (!started) {
-                        UINT32 key = 0;
-                        sample->GetUINT32(MFSampleExtension_CleanPoint, &key);
-                        if (t < from || !key) continue;
-                        started = true;
-                        base = t;
-                    }
-                    if (t - base <= lastVideo) continue;   // keep times strictly increasing across joins
-                    lastVideo = t - base;
-                    sample->SetSampleTime(t - base);
-                    if (SUCCEEDED(out->WriteSample(outVideo, sample.Get()))) wrote = true;
-                } else if (stream == aIn) {
-                    if (!started || t < base) continue;
-                    sample->SetSampleTime(t - base);
-                    out->WriteSample(outAudio, sample.Get());
+                if (!started) {
+                    UINT32 key = 0;
+                    sample->GetUINT32(MFSampleExtension_CleanPoint, &key);
+                    if (t < from || !key) continue;
+                    started = true;
+                    base = t;
+                    audioFrom = (base * kAudioRate + kSecond - 1) / kSecond;
                 }
+                if (t - base <= lastVideo) continue;   // keep times strictly increasing across joins
+                lastVideo = t - base;
+                sample->SetSampleTime(t - base);
+                if (SUCCEEDED(out->WriteSample(outVideo, sample.Get()))) wrote = true;
             }
+            // ...then the same stretch of audio, continuing seamlessly from the last segment's.
+            if (!started) continue;
+            FILE* f = nullptr;
+            if (_wfopen_s(&f, seg.pcmPath.c_str(), L"rb") != 0 || !f) continue;
+            int64_t frame = seg.audioFrame0;
+            if (frame < audioFrom) {   // skip what comes before the clip starts
+                _fseeki64(f, (audioFrom - frame) * 4, SEEK_SET);
+                frame = audioFrom;
+            }
+            for (;;) {
+                const size_t got = fread(pcm.data(), 4, pcm.size() / 2, f);
+                if (got == 0) break;
+                ComPtr<IMFMediaBuffer> buffer;
+                ComPtr<IMFSample> sample;
+                BYTE* data = nullptr;
+                const DWORD bytes = static_cast<DWORD>(got * 4);
+                if (FAILED(MFCreateMemoryBuffer(bytes, &buffer)) || FAILED(buffer->Lock(&data, nullptr, nullptr))) break;
+                memcpy(data, pcm.data(), bytes);
+                buffer->Unlock();
+                buffer->SetCurrentLength(bytes);
+                if (FAILED(MFCreateSample(&sample))) break;
+                sample->AddBuffer(buffer.Get());
+                sample->SetSampleTime(audioWritten * kSecond / kAudioRate);
+                sample->SetSampleDuration(int64_t(got) * kSecond / kAudioRate);
+                out->WriteSample(outAudio, sample.Get());
+                audioWritten += got;
+                frame += got;
+            }
+            fclose(f);
         }
         const bool ok = out && wrote && SUCCEEDED(out->Finalize());
         out.Reset();
