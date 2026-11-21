@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Visualizer VERSION 1.4.0 LANGUAGES CXX RC)
+project(Visualizer VERSION 1.5.0 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
