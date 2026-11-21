@@ -35,6 +35,7 @@ bool PaletteFromThumbnail(const GlobalSystemMediaTransportControlsSessionMediaPr
 void NowPlaying::Start() {
     if (m_thread.joinable()) return;
     m_stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    m_commandEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     m_thread = std::thread(&NowPlaying::ThreadMain, this);
 }
 
@@ -43,7 +44,14 @@ void NowPlaying::Stop() {
     SetEvent(m_stopEvent);
     m_thread.join();
     CloseHandle(m_stopEvent);
-    m_stopEvent = nullptr;
+    CloseHandle(m_commandEvent);
+    m_stopEvent = m_commandEvent = nullptr;
+}
+
+void NowPlaying::Send(Command command) {
+    if (!m_commandEvent) return;
+    m_command.store(static_cast<int>(command));
+    SetEvent(m_commandEvent);
 }
 
 TrackInfo NowPlaying::Get() const {
@@ -66,6 +74,21 @@ void NowPlaying::ThreadMain() {
     do {
         try {
             if (!manager) manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+            // A command from the keys or the menu: the player that's playing, else Windows' current one.
+            if (const auto command = static_cast<Command>(m_command.exchange(0)); command != Command::None) {
+                auto target = manager.GetCurrentSession();
+                for (const auto& s : manager.GetSessions())
+                    if (s.GetPlaybackInfo().PlaybackStatus() == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing) { target = s; break; }
+                if (!target) {
+                    m_noPlayer.store(true);
+                } else if (command == Command::PlayPause) {
+                    target.TryTogglePlayPauseAsync().get();
+                } else if (command == Command::Next) {
+                    target.TrySkipNextAsync().get();
+                } else {
+                    target.TrySkipPreviousAsync().get();
+                }
+            }
             // Prefer a session that is actually playing (e.g. Spotify playing while a browser tab
             // is paused); fall back to Windows' notion of the current session.
             auto session = manager.GetCurrentSession();
@@ -111,7 +134,10 @@ void NowPlaying::ThreadMain() {
         } catch (...) {
             manager = nullptr;   // e.g. the media service restarted: reconnect next poll
         }
-    } while (WaitForSingleObject(m_stopEvent, kPollMs) == WAIT_TIMEOUT);
+    } while ([&] {   // until stopped: poll, or wake at once for a command
+        const HANDLE events[2] = { m_stopEvent, m_commandEvent };
+        return WaitForMultipleObjects(2, events, FALSE, kPollMs) != WAIT_OBJECT_0;
+    }());
 
     manager = nullptr;
     uninit_apartment();

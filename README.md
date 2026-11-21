@@ -60,6 +60,7 @@ there's nothing to remember. `H` shows the few keys worth knowing plus the curre
 |---|---|
 | Right-click | The menu: visualiser, scene changes, the visualiser's own actions, effects, display, audio device, recording |
 | `←` `→` | Previous / next visualiser (with a random transition: crossfade, glitch cut, zoom-through, iris or pixel dissolve) |
+| `↑` / `↓` | Play / pause / next track in your music player (any player in Windows' media controls: Spotify, browsers…; previous track is in the menu) |
 | `C` | Scene changes: off → a new visualiser with each song (or every 4 minutes without track info) → **Random**: a random visualiser and look about every minute, switched at the start of a phrase or on a drop, never in the middle of a blast, supernova or quasar |
 | `F`, `Alt+Enter`, double-click | Toggle fullscreen (fullscreen keeps the monitor on: no screensaver or display sleep) |
 | `N` | Next look (Nebula: palette + gas shape; Neon Grid / Aurora: colour scheme; Liquid: Ink / Neon / Chrome; Oscilloscope: mode; Galaxy: shape + colours; Fractal flights: world; Signal: subject, style + palette; Detonation: Night / Ink / Dusk; Spectrum: Studio / Radial) |

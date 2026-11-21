@@ -338,6 +338,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         switch (vk) {
         case 'F':        window.ToggleFullscreen(); break;
         case VK_ESCAPE:  if (window.IsFullscreen()) window.SetFullscreen(false); else window.Close(); break;
+        case VK_UP:      nowPlaying.Send(NowPlaying::Command::PlayPause); overlay.ShowMessage(L"Play / pause", 1.2f); break;
+        case VK_DOWN:    nowPlaying.Send(NowPlaying::Command::Next); overlay.ShowMessage(L"Next track", 1.2f); break;
         case VK_RIGHT:   host.Next(); announce(); break;
         case VK_LEFT:    host.Previous(); announce(); break;
         case VK_F1:      showStats = !showStats; break;
@@ -416,12 +418,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
 
     // --- The right-click menu: every setting, with its key alongside -------------------------
     window.onContextMenu = [&](POINT at) {
-        enum : UINT { kViz = 1000, kScene = 1100, kGlitch = 1200, kDevice = 1300, kDisplay = 1400, kStream = 1500 };
+        enum : UINT { kViz = 1000, kScene = 1100, kGlitch = 1200, kDevice = 1300, kDisplay = 1400, kStream = 1500, kPrevTrack = 1600 };
         auto keyName = [](UINT vk) -> std::wstring {
             switch (vk) {
             case VK_SPACE: return L"Space";
             case VK_LEFT: return L"\u2190";
             case VK_RIGHT: return L"\u2192";
+            case VK_UP: return L"\u2191";
+            case VK_DOWN: return L"\u2193";
             case VK_F1: return L"F1";
             case VK_F12: return L"F12";
             case VK_ESCAPE: return L"Esc";
@@ -451,6 +455,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         static const wchar_t* kSceneItems[] = { L"Off", L"A new visualiser with each song", L"Random: a new scene and look every minute or so" };
         for (int i = 0; i < 3; ++i) radio(sceneMenu, kScene + i, kSceneItems[i], i == sceneChanges);
         sub(menu, sceneMenu, L"Scene changes\tC");
+
+        HMENU music = CreatePopupMenu();
+        item(music, VK_UP, L"Play / pause", VK_UP);
+        item(music, VK_DOWN, L"Next track", VK_DOWN);
+        item(music, kPrevTrack, L"Previous track");
+        sub(menu, music, L"Music");
 
         // The visualiser's own keys.
         const std::vector<VisualizerAction> actions = host.Active().Actions();
@@ -517,6 +527,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         DestroyMenu(menu);   // and its submenus
         if (cmd == 0) return;
         if (cmd == 1) window.onKeyDown(VK_ESCAPE);
+        else if (cmd == kPrevTrack) { nowPlaying.Send(NowPlaying::Command::Previous); overlay.ShowMessage(L"Previous track", 1.2f); }
         else if (cmd >= kStream && cmd < kStream + 3) setStreamMode(cmd - kStream);
         else if (cmd >= kDisplay && cmd < kDisplay + 3) setDisplayMode(cmd - kDisplay);
         else if (cmd >= kDevice && cmd < kDevice + 100) setAudioDevice(cmd == kDevice ? nullptr : &devices[cmd - kDevice - 1]);
@@ -676,6 +687,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         }
         if (std::wstring note = recorder.TakeMessage(); !note.empty()) overlay.ShowMessage(note, 4.0f);
         if (std::wstring note = updater.TakeMessage(); !note.empty()) overlay.ShowMessage(note, 4.0f);
+        if (nowPlaying.TakeNoPlayer()) overlay.ShowMessage(L"No music player to control", 2.5f);
         if (recorder.Recording()) {
             const int secs = static_cast<int>(recorder.RecordingSeconds());
             wchar_t rec[32];

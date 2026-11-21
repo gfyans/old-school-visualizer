@@ -12,6 +12,7 @@ constexpr float kDesignHeight = 1080.0f;
 const wchar_t* const kHelpLines[][2] = {
     { L"Right-click", L"The menu: every setting" },
     { L"\u2190  \u2192", L"Previous / next visualiser" },
+    { L"\u2191  \u2193", L"Play / pause  /  next track (your music player)" },
     { L"C", L"Scene changes: off / each song / random" },
     { L"F  or  double-click", L"Fullscreen" },
     { L"H", L"This help" },
