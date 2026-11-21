@@ -11,8 +11,7 @@ Where this is going next, in order. ✅ = done.
 3. **Album-art scenes.** The cover shatters into 3D voxels that pulse, orbit and reassemble on the downbeat.
 4. **Phone remote.** Scan a QR code and your phone becomes a controller on your home network: switch scenes, lock
    looks, trigger the quasar, supernova or detonation.
-5. **Rework Liquid and Spectrum.** Bring them up to the standard of the newer scenes; next to Signal and
-   Detonation they look plain.
+5. **Rework Liquid.** Bring it up to the standard of the newer scenes; next to Signal and Detonation it looks plain.
 
 ## Later
 - **Shader workshop.** Hot-reload while music plays, import Shadertoy shaders with the audio mapped in, and have
@@ -39,7 +38,7 @@ Where this is going next, in order. ✅ = done.
   ✅ Liquid; ✅ Oscilloscope; ✅ Aurora; ✅ Galaxy; ✅ Fractal flights; ✅ Signal (skull model, centre and
   grid layouts, ASCII / dither / LED / scan lines); ✅ Detonation (city, dome, void, crater, camera director; blasts on drops,
   released build-ups and big phrases; a dome that punches with the kicks);
-  ✅ Spectrum.
+  ✅ Spectrum (Studio and Radial looks; physical peak caps and drop fireworks).
 - **Feel:** ✅ auto-cycle; ✅ Random scene changes (a new scene and look every minute or so, on the phrase);
   ✅ transitions with character; ✅ glitch filter over every scene (`X`).
 - **Ease of use:** ✅ right-click menu with every setting; ✅ short help with the current visualiser's keys.

@@ -20,10 +20,15 @@ MeshOut main(float4 pos : POSITION, float4 nrm : NORMAL, uint id : SV_InstanceID
     // Perspective onto the screen, then into this instance's tile.
     float2 screen = v.xy * kFocal * b.z + b.xy * w;
     const float n = 0.5, f = 12.0;
-    o.pos = float4(screen.x / aspect, screen.y, w * f / (f - n) - n * f / (f - n), w);
+    // Depth: the grid behind the centre skull (brightness < 1) uses the back half of the range, so the big
+    // skull is always in front while each group still sorts itself.
+    float zn = f / (f - n) - n * f / ((f - n) * w);
+    zn = b.w < 0.99 ? 0.5 + 0.5 * zn : 0.5 * zn;
+    o.pos = float4(screen.x / aspect, screen.y, zn * w, w);
     o.view = v;
     o.nrm = Turn(nrm.xyz, a.x, a.y);
     o.bake = float2(pos.w, nrm.w);
     o.eyes = a.w;
+    o.dim = b.w;
     return o;
 }

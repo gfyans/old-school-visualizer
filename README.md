@@ -25,7 +25,9 @@ It listens to whatever your PC is playing (Spotify, a browser, games…) and ren
   white dome that tears at the buildings on its rim and blows a ring through the clouds, then turns to a black
   sphere whose burning rim punches out with every kick before it collapses into a crater the city rebuilds. Night, manga Ink or Dusk looks; the camera cuts between an orbit, an avenue
   flight, a rooftop skim, an overhead view and a distant witness.
-* **Spectrum**: classic bar spectrum.
+* **Spectrum**: the hi-fi scene, an honest 64-band analyser shown two ways: **Studio** (glossy 3D bars on a
+  mirror floor in a dark room, with peak caps that fall under gravity and bounce), **Radial** (a ring of bars round a
+  glowing core, every kick rippling an echo of it outward). On a drop every peak cap launches like a firework and bursts into sparks.
 
 It also understands the music beyond loudness:
 * **Beat grid:** it locks onto the song's tempo and *predicts* beats, so pulses land on the beat instead of just after it.
@@ -54,10 +56,10 @@ there's nothing to remember. `H` shows the few keys worth knowing plus the curre
 | `←` `→` | Previous / next visualiser (with a random transition: crossfade, glitch cut, zoom-through, iris or pixel dissolve) |
 | `C` | Scene changes: off → a new visualiser with each song (or every 4 minutes without track info) → **Random**: a random visualiser and look about every minute, switched at the start of a phrase or on a drop, never in the middle of a blast, supernova or quasar |
 | `F`, `Alt+Enter`, double-click | Toggle fullscreen |
-| `N` | Next look (Nebula: palette + gas shape; Neon Grid / Aurora: colour scheme; Liquid: preset; Oscilloscope: mode; Galaxy: shape + colours; Fractal flights: world; Signal: subject, style + palette; Detonation: Night / Ink / Dusk) |
+| `N` | Next look (Nebula: palette + gas shape; Neon Grid / Aurora: colour scheme; Liquid: preset; Oscilloscope: mode; Galaxy: shape + colours; Fractal flights: world; Signal: subject, style + palette; Detonation: Night / Ink / Dusk; Spectrum: Studio / Radial) |
 | `Space` | Lock / unlock the current look |
-| `M` | Galaxy and Detonation: next camera shot. Signal: centre / grid |
-| `Q` | Galaxy: fire the quasar. Fractal flights: hyperspeed. Nebula: supernova. Detonation: detonate (all as on a drop) |
+| `M` | Galaxy, Detonation and Spectrum's Studio: next camera shot. Signal: centre / grid. Spectrum's Radial: colours |
+| `Q` | Galaxy: fire the quasar. Fractal flights: hyperspeed. Nebula: supernova. Detonation: detonate. Spectrum: fireworks (all as on a drop) |
 | `P` | Nebula: summon a pulsar |
 | `B` | Cyberpunk equaliser bars along the bottom (neon LED segments, glitch tears on hard hits) |
 | `R` | Record to MP4 (press again to stop and save) |
@@ -193,7 +195,7 @@ Measured on an RTX 3080 at 2560×1440 fullscreen:
 * Detonation: about 1.5 ms GPU per frame (80% resolution; the city is traced cell by cell, exactly).
 * Signal: about 0.2–1.9 ms GPU per frame at full resolution (the skull model is drawn once per grid tile, up to 64;
   the other subjects take one ray per glyph, dot or LED, and scan lines take three).
-* Spectrum: 0.01 ms GPU per frame.
+* Spectrum: light in every look (85% resolution; Studio traces its 64 bars exactly, cell by cell).
 * CPU: under 1% of one core in a window, about 3.5% fullscreen with the stats overlay; about 20% more while
   recording or buffering instant replay.
 
@@ -273,7 +275,7 @@ Per frame:
 
 ### Adding a visualiser
 
-1. Create `src/viz/<name>/<Name>Visualizer.{h,cpp}` implementing `IVisualizer` (see `SpectrumVisualizer` for the minimum):
+1. Create `src/viz/<name>/<Name>Visualizer.{h,cpp}` implementing `IVisualizer` (see `DetonationVisualizer` for a complete example):
    * `CreateResources` / `ReleaseResources`: create your shaders and buffers (also called again after GPU device loss).
    * `Update(audio, dt)`: animate from `AudioFeatures` (all values 0–1).
    * `Render(renderer, time, dt)`: bind your resources (slots `b2+`, `t0+`, `s0+` are free) and call `renderer.DrawFullscreen(ps)`.

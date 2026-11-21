@@ -202,14 +202,16 @@ void VisualizerHost::AdaptScale(Slot& slot, float dt) {
 void VisualizerHost::RenderSlot(Slot& slot, Renderer& renderer, float time, float dt) {
     EnsureTarget(slot);
     if (!slot.target.rtv) return;
+    // Adapt the scale before sizing the viewport: the composite (LayerFor) reads the area at the new scale,
+    // so drawing at the old one for a frame showed a strip of stale picture along the right and bottom.
+    ID3D11DeviceContext* ctx = renderer.Context();
+    slot.timer.Collect(ctx);
+    AdaptScale(slot, dt);
     int w, h;
     ViewportSize(slot, w, h);
     w = std::min(w, slot.target.width);
     h = std::min(h, slot.target.height);
 
-    ID3D11DeviceContext* ctx = renderer.Context();
-    slot.timer.Collect(ctx);
-    AdaptScale(slot, dt);
     slot.timer.Begin(ctx);
     renderer.BindTarget(slot.target.rtv.Get(), w, h, time, dt);
     slot.viz->Render(renderer, time, dt);

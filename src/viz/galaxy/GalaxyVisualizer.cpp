@@ -228,7 +228,6 @@ void GalaxyVisualizer::Update(const AudioFeatures& audio, float dt) {
     bool beat = false;
     if (audio.beatCount != m_lastBeat) { m_lastBeat = audio.beatCount; beat |= !gridLocked; }
     if (audio.gridBeat != m_lastGrid) { m_lastGrid = audio.gridBeat; beat |= gridLocked; }
-    m_quasarCooldown -= dt;
     if (audio.snareCount != m_lastSnare) {   // snares: a smaller ripple through the arms
         m_lastSnare = audio.snareCount;
         if (!audio.silent) {
@@ -246,9 +245,8 @@ void GalaxyVisualizer::Update(const AudioFeatures& audio, float dt) {
         m_kick = std::max(m_kick, 0.35f + 0.8f * audio.bass);
         ++m_beatsSinceChange;
         ++m_shotBeats;
-        if (audio.bass > 0.8125f && m_intensity > 0.5125f && m_quasarCooldown <= 0.0f) {
+        if (audio.bass > 0.8125f && m_intensity > 0.5125f) {
             m_quasar = std::max(m_quasar, 0.45f + 0.35f * audio.bass);   // harder hits, bigger bursts
-            m_quasarCooldown = 10.5f;
         }
     }
     const float waveSpeed = 0.9f + 0.7f * audio.intensity;
@@ -266,7 +264,6 @@ void GalaxyVisualizer::Update(const AudioFeatures& audio, float dt) {
         m_lastDrop = audio.dropCount;
         m_fireQuasar = false;
         m_quasar = 1.0f;
-        m_quasarCooldown = 6.0f;
         m_flash = 1.0f;
         m_waves[m_nextWave][0] = 0.02f;
         m_waves[m_nextWave][1] = 2.5f;

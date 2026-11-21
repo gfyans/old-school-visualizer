@@ -85,8 +85,9 @@ void DetonationVisualizer::ReleaseResources() {
 }
 
 void DetonationVisualizer::Detonate() {
-    // A second drop while the void hangs there erupts again, bigger.
-    const bool again = m_phase == Phase::Void;
+    // A drop while a blast is still going (white dome, void or collapse) erupts again from where the dome
+    // is, bigger, with a fresh shockwave.
+    const bool again = m_phase != Phase::Calm;
     m_domeStart = again ? m_domeR : 0.0f;
     m_domeMax = again ? std::min(m_domeMax + 8.0f, 46.0f) : 30.0f;
     m_phase = Phase::Blast;
@@ -171,7 +172,7 @@ void DetonationVisualizer::Update(const AudioFeatures& audio, float dt) {
         if (phrase && m_sinceBlast > 22.0f && m_regrow > 0.5f && m_intensity > 0.5f) blast = true;
         if (m_sinceBlast > 55.0f && m_intensity > 0.2f && (onDownbeat || !gridLocked)) blast = true;
     }
-    if (blast && m_phase != Phase::Blast && m_freeze < 0.0f) Detonate();
+    if (blast && m_freeze < 0.0f) Detonate();   // even mid-blast: it erupts again
 
     // Developer switch: hold one moment of a blast.
     if (m_freeze >= 0.0f) {
@@ -359,7 +360,7 @@ bool DetonationVisualizer::OnKey(UINT vk) {
         m_message = kShots[m_shot];
         return true;
     case 'Q':
-        if (m_phase != Phase::Blast) Detonate();
+        Detonate();
         return true;
     case VK_SPACE:
         m_locked = !m_locked;

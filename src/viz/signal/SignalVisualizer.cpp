@@ -27,12 +27,15 @@ static_assert(sizeof(SignalConstants) == sizeof(float) * 36);
 constexpr int kMaxInstances = 64;
 struct MeshInstances {     // matches cbuffer SignalMesh in signal_mesh.hlsli
     float a[kMaxInstances][4];   // yaw, pitch, scale, eye glow
-    float b[kMaxInstances][4];   // tile centre x, y (screen units, y -1..1), tile scale
+    float b[kMaxInstances][4];   // tile centre x, y (screen units, y -1..1), tile scale, brightness
 };
 
 constexpr float kTileView = 0.68f;   // how much of a tile a subject fills (matches signal_ps.hlsl)
 constexpr float kModelScale = 1.25f; // the model fits in -1..1; this matches the distance-field skull's size
 constexpr float kCentreZoom = 1.2f;  // the model alone in the centre: close up
+constexpr int kBackRows = 4;         // the dim grid behind the centre skull (matches signal_ps.hlsl)
+constexpr float kBackDim = 0.3f;     // ...and how bright it is
+constexpr float kCentreLift = 0.17f;  // ...and raised (screen units, 2 = full height): the model sits low otherwise
 constexpr int kModelResource = 101;  // RCDATA in res/models.rc
 
 const wchar_t* kStyles[] = { L"", L"ASCII", L"Dither", L"LED", L"Scan lines" };
@@ -308,13 +311,8 @@ bool SignalVisualizer::EnsureSceneTargets(ID3D11Device* device, int w, int h) {
 void SignalVisualizer::DrawModel(Renderer& renderer, int slot, int rows, int w, int h, float time, float dt) {
     MeshInstances inst{};
     int count = 0;
-    if (rows == 0) {
-        const float a[4] = { m_yaw, m_pitch, kModelScale * (1.0f + 0.05f * m_pulse), m_eyes };
-        const float b[4] = { 0.0f, 0.0f, kCentreZoom, 0.0f };
-        memcpy(inst.a[0], a, sizeof(a));
-        memcpy(inst.b[0], b, sizeof(b));
-        count = 1;
-    } else {
+    // One skull per grid tile; the centre layout also has a dim grid of smaller ones behind its skull.
+    auto addGrid = [&](int rows, float brightness) {
         const float T = 2.0f / static_cast<float>(rows);
         const float aspect = static_cast<float>(w) / static_cast<float>(h);
         const float scroll = std::fmod(m_scroll, 240.0f);
@@ -337,12 +335,22 @@ void SignalVisualizer::DrawModel(Renderer& renderer, int slot, int rows, int w, 
                     m_pitch + 0.08f * std::sin(m_spin * 1.7f - 0.5f * static_cast<float>(row)),
                     kModelScale * (1.0f + 0.12f * ripple),
                     m_eyes * (0.4f + 0.6f * Hash(col, row)) };
-                const float b[4] = { cx, cy, T * 0.5f / kTileView, 0.0f };
+                const float b[4] = { cx, cy, T * 0.5f / kTileView, brightness };
                 memcpy(inst.a[count], a, sizeof(a));
                 memcpy(inst.b[count], b, sizeof(b));
                 ++count;
             }
         }
+    };
+    if (rows == 0) {
+        const float a[4] = { m_yaw, m_pitch, kModelScale * (1.0f + 0.05f * m_pulse), m_eyes };
+        const float b[4] = { 0.0f, kCentreLift, kCentreZoom, 1.0f };
+        memcpy(inst.a[0], a, sizeof(a));
+        memcpy(inst.b[0], b, sizeof(b));
+        count = 1;
+        addGrid(kBackRows, kBackDim);
+    } else {
+        addGrid(rows, 1.0f);
     }
 
     ID3D11DeviceContext* ctx = renderer.Context();

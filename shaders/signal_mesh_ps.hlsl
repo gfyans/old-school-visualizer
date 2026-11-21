@@ -17,5 +17,5 @@ float4 main(MeshOut i) : SV_Target {
     col += float3(0.15, 0.45, 1.0) * rim * 0.8 * ao;
     float socket = i.bake.y;
     col = lerp(col, col * 0.08 + float3(1.0, 0.12, 0.08) * (0.12 + 1.1 * i.eyes) * socket, saturate(socket * 1.5));
-    return float4(col, 1.0);
+    return float4(col * i.dim, i.dim);   // dimmed ones let the data rain through too
 }

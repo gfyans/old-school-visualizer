@@ -27,6 +27,8 @@ SamplerState sceneSampler : register(s0);
 // The subject being drawn by this ray, and how it's posed (set per cell/tile before marching).
 static int g_subjA = 0, g_subjB = 0;
 static float g_morph = 0.0, g_yaw = 0.0, g_pitch = 0.0, g_scale = 1.0, g_eyes = 0.0;
+static const float kBackRows = 4.0;   // the dim grid behind a subject in the centre (matches SignalVisualizer.cpp)
+static const float kBackDim = 0.3;
 static const float kTileView = 0.68;   // how much of a grid tile the subject fills (matches SignalVisualizer.cpp)
 
 float SdSphere(float3 p, float r) { return length(p) - r; }
@@ -210,6 +212,7 @@ float3 Rain(float2 cell) {
 }
 
 // The scene at one ray: lit subject, or data rain behind it. Returns colour for the styles to use.
+static bool g_hit = false;   // whether the last Render hit the subject
 float3 Render(float2 sp, float2 cell) {
     float3 ro = float3(0, 0.0, 3.4), rd = normalize(float3(sp, -1.9));
     // Bounding sphere: most rays miss, and skip the march.
@@ -227,6 +230,7 @@ float3 Render(float2 sp, float2 cell) {
             if (t > 6.0) break;
         }
     }
+    g_hit = hit;
     if (hit) {
         float3 p = ro + rd * t, n = Normal(p);
         // Ambient occlusion: how closed-in this spot is (sockets, nose, between the teeth go black).
@@ -300,7 +304,12 @@ float3 Scene(float2 sp, float2 px, float2 cell, float lod) {
         col = ModelScene(layout, px, lod, cell);
     } else {
         g_subjA = a; g_subjB = b; g_morph = m;
-        col = Render(TileView(sp, layout == 0 ? rowsNow : rowsPrev), cell);
+        float rows = layout == 0 ? rowsNow : rowsPrev;
+        col = Render(TileView(sp, rows), cell);
+        if (!g_hit && rows < 0.5) {   // around a subject in the centre: the dim grid behind it
+            float3 back = Render(TileView(sp, kBackRows), cell);
+            if (g_hit) col = back * kBackDim + col * (1.0 - kBackDim);
+        }
     }
     return col;
 }

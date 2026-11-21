@@ -85,7 +85,7 @@ private:
 
     float m_time = 0.0f, m_anim = 0.0f, m_pattern = 0.0f, m_accSpin = 0.0f, m_yaw = 0.0f;
     float m_gravity = 0.0f, m_treble = 0.0f, m_buildUp = 0.0f, m_beatGlow = 0.0f, m_intensity = 0.0f;
-    float m_quasar = 0.0f, m_quasarCooldown = 0.0f, m_flash = 0.0f;
+    float m_quasar = 0.0f, m_flash = 0.0f;
     float m_waves[4][2] = {};   // front radius, strength
     int m_nextWave = 0;
     bool m_silent = true;
