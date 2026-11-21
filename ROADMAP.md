@@ -18,7 +18,6 @@ Where this is going next, in order. ✅ = done.
   Claude write a new visualiser from a description.
 - **Presets and favourites.** Save looks you love.
 - **Screensaver build.** The same exe as a `.scr`.
-- **Signal: a head in profile** built from a proper model, like the skull.
 - **More worlds for Fractal flights.** A Mandelbulb set piece and a working Kleinian cave world.
 - **Harder rhythms.** A look-ahead dynamic-programming phase stage for thrash metal and syncopated techno.
 - **Transparent window for OBS** (DirectComposition) instead of chroma key.
@@ -35,8 +34,8 @@ Where this is going next, in order. ✅ = done.
   lock after beatless intros; ✅ tempo-driven pace; ✅ instrument detection (kick, snare, hats, voice, pads); ✅ key,
   chords and mood colour; ✅ now playing with album-art palettes; ✅ equaliser bars.
 - **Visualisers:** ✅ Nebula (TAA, light scattering, bloom, pulsar, supernova, directed flight); ✅ Neon Grid;
-  ✅ Liquid; ✅ Oscilloscope; ✅ Aurora; ✅ Galaxy; ✅ Fractal flights; ✅ Signal (skull model, centre and
-  grid layouts, ASCII / dither / LED / scan lines); ✅ Detonation (city, dome, void, crater, camera director; blasts on drops,
+  ✅ Liquid; ✅ Oscilloscope; ✅ Aurora; ✅ Galaxy; ✅ Fractal flights; ✅ Signal (skull, gas-mask head and brain models,
+  centre and grid layouts, ASCII / dither / LED / scan lines); ✅ Detonation (city, dome, void, crater, camera director; blasts on drops,
   released build-ups and big phrases; a dome that punches with the kicks);
   ✅ Spectrum (Studio and Radial looks; physical peak caps and drop fireworks).
 - **Feel:** ✅ auto-cycle; ✅ Random scene changes (a new scene and look every minute or so, on the phrase);

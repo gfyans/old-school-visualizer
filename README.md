@@ -15,10 +15,10 @@ It listens to whatever your PC is playing (Spotify, a browser, games…) and ren
   changes shots on the downbeat, and drops make the black hole fire a quasar.
 * **Fractal flights**: fly down a winding tunnel through infinite raymarched fractals: Menger halls, a Mandelbox,
   Apollonian foam, coral and a cathedral, with rings and bands of light on the beat and hyperspeed on drops.
-* **Signal**: cyberpunk glitch art. A cyber skull (nodding with the vocals, eyes flaring on snares), a lattice
-  brain or a monolith turns in the dark, drawn as ASCII glyphs, hard-palette dithering, LED cells
-  or torn scan lines, over falling data rain. It alternates between one subject close up and a scrolling grid of
-  them filling the screen, each turning in a wave with kicks rippling across. Snares tear it, hi-hats flicker the
+* **Signal**: cyberpunk glitch art. A cyber skull or a gas-mask head (nodding with the vocals, eyes flaring on
+  snares) or a brain turns in the dark, drawn as ASCII glyphs, hard-palette dithering, LED cells
+  or torn scan lines, over falling data rain. It alternates between one subject close up (with a dim grid of them
+  behind) and a scrolling grid of them filling the screen, each turning in a wave with kicks rippling across. Snares tear it, hi-hats flicker the
   glyphs, build-ups dissolve it, drops flash it inside out and flood the screen.
 * **Detonation**: a vast city at night around a glowing spire. Kicks send rings of light across the rooftops,
   build-ups charge the spire and spiral the clouds, and a drop (or a build-up letting go, or a big phrase) erupts a
@@ -193,7 +193,7 @@ Measured on an RTX 3080 at 2560×1440 fullscreen:
   the vertex shader, so there are no particle buffers or simulation; the smooth galaxy light is drawn analytically.
 * Fractal flights: about 0.3–1.3 ms GPU per frame depending on the world (50% resolution).
 * Detonation: about 1.5 ms GPU per frame (80% resolution; the city is traced cell by cell, exactly).
-* Signal: about 0.2–1.9 ms GPU per frame at full resolution (the skull model is drawn once per grid tile, up to 64;
+* Signal: about 0.2–1.9 ms GPU per frame at full resolution (a model is drawn once per grid tile, up to 64;
   the other subjects take one ray per glyph, dot or LED, and scan lines take three).
 * Spectrum: light in every look (85% resolution; Studio traces its 64 bars exactly, cell by cell).
 * CPU: under 1% of one core in a window, about 3.5% fullscreen with the stats overlay; about 20% more while
@@ -234,10 +234,16 @@ Dev tools:
   flight path repeatable. Together they allow before/after comparisons.
 * `VISUALIZER_FAKE_MONITORS=2` splits one screen into side-by-side pretend monitors, to try the multi-monitor modes.
 * `tools\make_icon.ps1` regenerates `res\app.ico`.
-* Signal's skull is a third-party model, so it isn't in the repository. `python tools\mesh\stl_to_mesh.py model.stl
-  assets\cyberskull.mesh` converts a binary STL (decimated to about 110k triangles, with baked crevice shading); the
-  build embeds `assets\cyberskull.mesh` when it's there, and otherwise Signal draws a procedural skull.
-  `VISUALIZER_SIGNAL_LOOK=<style 1-4>,<subject 0-2>[,<grid rows 0-4>]` fixes Signal's look for comparisons.
+* Signal's skull, gas-mask head and brain are third-party models, so they aren't in the repository.
+  `python tools\mesh\stl_to_mesh.py model.stl|model.3mf assets\<name>.mesh` converts a binary STL or a 3MF
+  (decimated to about 70–120k triangles, with baked crevice shading; `--eyes` places the glowing eyes, `--turn` and
+  `--tilt` fix a model that doesn't face the front). The build embeds `assets\cyberskull.mesh`, `gashead.mesh` and
+  `brain.mesh` when they're there (re-run CMake after adding one); without them Signal draws a procedural skull and
+  brain and leaves the head out. Its exact commands:
+  `stl_to_mesh.py cyberskull.stl assets\cyberskull.mesh`, `stl_to_mesh.py gasheada1m.3mf assets\gashead.mesh --eyes
+  0.25,0.08,0.17,0.17` and `stl_to_mesh.py brain.stl assets\brain.mesh --eyes none`.
+  `VISUALIZER_SIGNAL_LOOK=<style 1-4>,<subject 0-2>[,<grid rows 0-4>]` fixes Signal's look for comparisons
+  (subjects 0 skull, 1 gas mask, 2 brain).
 * `VISUALIZER_DETONATION=<look 0-2>,<shot 0-4>[,<seconds into a blast>]` fixes Detonation's look and camera shot
   (and optionally holds one moment of a blast).
 

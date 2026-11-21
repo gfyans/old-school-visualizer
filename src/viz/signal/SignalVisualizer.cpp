@@ -35,12 +35,14 @@ constexpr float kModelScale = 1.25f; // the model fits in -1..1; this matches th
 constexpr float kCentreZoom = 1.2f;  // the model alone in the centre: close up
 constexpr int kBackRows = 4;         // the dim grid behind the centre skull (matches signal_ps.hlsl)
 constexpr float kBackDim = 0.3f;     // ...and how bright it is
-constexpr float kCentreLift = 0.17f;  // ...and raised (screen units, 2 = full height): the model sits low otherwise
-constexpr int kModelResource = 101;  // RCDATA in res/models.rc
+// ...and raised (screen units, 2 = full height) so each model sits in the middle: skull, head, brain.
+constexpr float kCentreLift[3] = { 0.17f, 0.08f, -0.02f };
+constexpr int kModelResource = 101;  // RCDATA ids 101 skull, 102 head, 103 brain (CMakeLists.txt writes models.rc)
 
 const wchar_t* kStyles[] = { L"", L"ASCII", L"Dither", L"LED", L"Scan lines" };
-const wchar_t* kSubjects[] = { L"Skull", L"Brain", L"Monolith" };
+const wchar_t* kSubjects[] = { L"Skull", L"Gas mask", L"Brain" };
 constexpr int kSubjectCount = 3;
+constexpr int kHead = 1;   // the only subject with no distance-field fallback
 
 struct Palette { const wchar_t* name; float c[4][3]; };   // bg, mid, hi, accent
 const Palette kPalettes[] = {
@@ -96,12 +98,49 @@ bool SignalVisualizer::CreateResources(ID3D11Device* device) {
     cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     cb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     if (FAILED(device->CreateBuffer(&cb, nullptr, &m_cb))) return false;
-    m_hasModel = LoadModel(device);   // optional: falls back to the distance-field skull
+    // The models are optional: the skull and brain fall back to distance fields, the head is left out.
+    if (CreateMeshPipeline(device))
+        for (int i = 0; i < kModels; ++i) m_models[i].ok = LoadModel(device, i);
+    if (!HasModel(kHead)) {
+        if (m_subject == kHead) m_subject = 0;
+        if (m_nextSubject == kHead) { m_nextSubject = m_subject; m_morph = 0.0f; }
+    }
     return true;
 }
 
-bool SignalVisualizer::LoadModel(ID3D11Device* device) {
-    HRSRC res = FindResourceW(nullptr, MAKEINTRESOURCEW(kModelResource), MAKEINTRESOURCEW(10) /* RT_RCDATA */);
+bool SignalVisualizer::CreateMeshPipeline(ID3D11Device* device) {
+    const D3D11_INPUT_ELEMENT_DESC layout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R16G16B16A16_SNORM, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },   // w: cavity
+        { "NORMAL",   0, DXGI_FORMAT_R8G8B8A8_SNORM,     0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },   // w: eye mask
+    };
+    D3D11_BUFFER_DESC icb{};
+    icb.ByteWidth = sizeof(MeshInstances);
+    icb.Usage = D3D11_USAGE_DYNAMIC;
+    icb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    icb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    D3D11_DEPTH_STENCIL_DESC ds{};
+    ds.DepthEnable = TRUE;
+    ds.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+    ds.DepthFunc = D3D11_COMPARISON_LESS;
+    D3D11_RASTERIZER_DESC rs{};
+    rs.FillMode = D3D11_FILL_SOLID;
+    rs.CullMode = D3D11_CULL_NONE;   // a few thin open parts; the GPU has time to spare
+    rs.DepthClipEnable = TRUE;
+    D3D11_SAMPLER_DESC sd{};
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.MaxLOD = D3D11_FLOAT32_MAX;
+    return SUCCEEDED(device->CreateBuffer(&icb, nullptr, &m_instanceCB)) &&
+           SUCCEEDED(device->CreateVertexShader(g_signal_mesh_vs, sizeof(g_signal_mesh_vs), nullptr, &m_meshVS)) &&
+           SUCCEEDED(device->CreatePixelShader(g_signal_mesh_ps, sizeof(g_signal_mesh_ps), nullptr, &m_meshPS)) &&
+           SUCCEEDED(device->CreateInputLayout(layout, ARRAYSIZE(layout), g_signal_mesh_vs, sizeof(g_signal_mesh_vs), &m_meshLayout)) &&
+           SUCCEEDED(device->CreateDepthStencilState(&ds, &m_depthState)) &&
+           SUCCEEDED(device->CreateRasterizerState(&rs, &m_raster)) &&
+           SUCCEEDED(device->CreateSamplerState(&sd, &m_sampler));
+}
+
+bool SignalVisualizer::LoadModel(ID3D11Device* device, int subject) {
+    HRSRC res = FindResourceW(nullptr, MAKEINTRESOURCEW(kModelResource + subject), MAKEINTRESOURCEW(10) /* RT_RCDATA */);
     if (!res) return false;
     HGLOBAL handle = LoadResource(nullptr, res);
     const auto* data = static_cast<const uint8_t*>(handle ? LockResource(handle) : nullptr);
@@ -124,40 +163,18 @@ bool SignalVisualizer::LoadModel(ID3D11Device* device) {
     ib.ByteWidth = indices * indexBytes;
     ib.BindFlags = D3D11_BIND_INDEX_BUFFER;
     D3D11_SUBRESOURCE_DATA idata{ data + 20 + vb.ByteWidth, 0, 0 };
-    const D3D11_INPUT_ELEMENT_DESC layout[] = {
-        { "POSITION", 0, DXGI_FORMAT_R16G16B16A16_SNORM, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },   // w: cavity
-        { "NORMAL",   0, DXGI_FORMAT_R8G8B8A8_SNORM,     0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },   // w: eye socket
-    };
-    D3D11_BUFFER_DESC icb{};
-    icb.ByteWidth = sizeof(MeshInstances);
-    icb.Usage = D3D11_USAGE_DYNAMIC;
-    icb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    icb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    D3D11_DEPTH_STENCIL_DESC ds{};
-    ds.DepthEnable = TRUE;
-    ds.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
-    ds.DepthFunc = D3D11_COMPARISON_LESS;
-    D3D11_RASTERIZER_DESC rs{};
-    rs.FillMode = D3D11_FILL_SOLID;
-    rs.CullMode = D3D11_CULL_NONE;   // a few thin open parts; the GPU has time to spare
-    rs.DepthClipEnable = TRUE;
-    D3D11_SAMPLER_DESC sd{};
-    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sd.MaxLOD = D3D11_FLOAT32_MAX;
-    if (FAILED(device->CreateBuffer(&vb, &vdata, &m_meshVB)) ||
-        FAILED(device->CreateBuffer(&ib, &idata, &m_meshIB)) ||
-        FAILED(device->CreateBuffer(&icb, nullptr, &m_instanceCB)) ||
-        FAILED(device->CreateVertexShader(g_signal_mesh_vs, sizeof(g_signal_mesh_vs), nullptr, &m_meshVS)) ||
-        FAILED(device->CreatePixelShader(g_signal_mesh_ps, sizeof(g_signal_mesh_ps), nullptr, &m_meshPS)) ||
-        FAILED(device->CreateInputLayout(layout, ARRAYSIZE(layout), g_signal_mesh_vs, sizeof(g_signal_mesh_vs), &m_meshLayout)) ||
-        FAILED(device->CreateDepthStencilState(&ds, &m_depthState)) ||
-        FAILED(device->CreateRasterizerState(&rs, &m_raster)) ||
-        FAILED(device->CreateSamplerState(&sd, &m_sampler)))
-        return false;
-    m_indexCount = indices;
-    m_indexFormat = indexBytes == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+    Model& m = m_models[subject];
+    if (FAILED(device->CreateBuffer(&vb, &vdata, &m.vb)) || FAILED(device->CreateBuffer(&ib, &idata, &m.ib))) return false;
+    m.indexCount = indices;
+    m.indexFormat = indexBytes == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
     return true;
+}
+
+int SignalVisualizer::RandomSubject(int other) {
+    int pick;
+    do pick = std::uniform_int_distribution<int>(0, kSubjectCount - 1)(m_rng);
+    while (pick == other || (pick == kHead && !HasModel(kHead)));
+    return pick;
 }
 
 void SignalVisualizer::ReleaseResources() {
@@ -168,12 +185,10 @@ void SignalVisualizer::ReleaseResources() {
     m_raster.Reset();
     m_depthState.Reset();
     m_instanceCB.Reset();
-    m_meshIB.Reset();
-    m_meshVB.Reset();
+    for (Model& m : m_models) m = Model{};
     m_meshLayout.Reset();
     m_meshPS.Reset();
     m_meshVS.Reset();
-    m_hasModel = false;
     m_cb.Reset();
     m_ps.Reset();
 }
@@ -190,7 +205,7 @@ void SignalVisualizer::NextLook(bool newSubject, int rows) {
     m_style = 1 + (m_style + std::uniform_int_distribution<int>(0, 2)(m_rng)) % 4;   // a different style
     m_palette = (m_palette + 1 + std::uniform_int_distribution<int>(0, kPaletteCount - 2)(m_rng)) % kPaletteCount;
     if (newSubject && m_morph <= 0.0f) {
-        m_nextSubject = (m_subject + 1 + std::uniform_int_distribution<int>(0, kSubjectCount - 2)(m_rng)) % kSubjectCount;
+        m_nextSubject = RandomSubject(m_subject);
         m_morph = 0.001f;
     }
     // Alternate one subject in the centre with a grid of them (mostly; now and then a different grid).
@@ -251,12 +266,12 @@ void SignalVisualizer::Update(const AudioFeatures& audio, float dt) {
     c.morph = m_morph;
     c.cellScale = kCellScale[m_style];
     c.time = std::fmod(m_time, 1000.0f);
-    // A slow turn with a sway; the skull three-quarter. The model skull nods with the voice instead of
-    // working a jaw.
+    // A slow turn with a sway: the skull and head three-quarter, the brain more side on. The models of the
+    // skull and head nod with the voice instead of working a jaw.
     const int shown = m_morph > 0.5f ? m_nextSubject : m_subject;
-    const float base = shown == 0 ? -0.5f : 0.0f;
-    m_yaw = base + (shown == 0 ? 0.3f : 0.55f) * std::sin(m_spin) + 0.15f * std::sin(m_spin * 2.3f);
-    m_pitch = 0.12f * std::sin(m_spin * 0.7f) - 0.05f - (m_hasModel && shown == 0 ? 0.12f * m_jaw : 0.0f);
+    const float base = shown <= kHead ? -0.5f : -0.7f;
+    m_yaw = base + (shown <= kHead ? 0.3f : 0.55f) * std::sin(m_spin) + 0.15f * std::sin(m_spin * 2.3f);
+    m_pitch = 0.12f * std::sin(m_spin * 0.7f) - 0.05f - (HasModel(shown) && shown <= kHead ? 0.12f * m_jaw : 0.0f);
     c.yaw = m_yaw;
     c.pitch = m_pitch;
     c.jaw = shown == 0 ? m_jaw : 0.0f;
@@ -267,7 +282,7 @@ void SignalVisualizer::Update(const AudioFeatures& audio, float dt) {
     c.flash = m_flash;
     c.eyes = m_eyes;
     c.rain = m_rain;
-    c.hasMesh = m_hasModel ? 1.0f : 0.0f;
+    c.hasMesh = static_cast<float>((HasModel(0) ? 1 : 0) | (HasModel(1) ? 2 : 0) | (HasModel(2) ? 4 : 0));   // one bit per model
     c.layoutMix = m_layoutMix;
     c.spin = m_spin;
     c.scroll = std::fmod(m_scroll, 240.0f);   // a multiple of every tile size, so the wrap is invisible
@@ -302,13 +317,15 @@ bool SignalVisualizer::EnsureSceneTargets(ID3D11Device* device, int w, int h) {
     d.BindFlags = D3D11_BIND_DEPTH_STENCIL;
     return m_scene[0].Create(device, w, h, DXGI_FORMAT_R16G16B16A16_FLOAT, true) &&
            m_scene[1].Create(device, w, h, DXGI_FORMAT_R16G16B16A16_FLOAT, true) &&
+           m_scene[2].Create(device, w, h, DXGI_FORMAT_R16G16B16A16_FLOAT, true) &&
            SUCCEEDED(device->CreateTexture2D(&d, nullptr, &m_depth)) &&
            SUCCEEDED(device->CreateDepthStencilView(m_depth.Get(), nullptr, &m_dsv));
 }
 
-// Draws the skull model into m_scene[slot]: one in the centre, or one per grid tile (posed like
+// Draws a subject's model into m_scene[slot]: one in the centre, or one per grid tile (posed like
 // signal_ps.hlsl's TileView poses the distance-field subjects).
-void SignalVisualizer::DrawModel(Renderer& renderer, int slot, int rows, int w, int h, float time, float dt) {
+void SignalVisualizer::DrawModel(Renderer& renderer, int slot, int subject, int rows, int w, int h, float time, float dt) {
+    const Model& model = m_models[subject];
     MeshInstances inst{};
     int count = 0;
     // One skull per grid tile; the centre layout also has a dim grid of smaller ones behind its skull.
@@ -344,7 +361,7 @@ void SignalVisualizer::DrawModel(Renderer& renderer, int slot, int rows, int w, 
     };
     if (rows == 0) {
         const float a[4] = { m_yaw, m_pitch, kModelScale * (1.0f + 0.05f * m_pulse), m_eyes };
-        const float b[4] = { 0.0f, kCentreLift, kCentreZoom, 1.0f };
+        const float b[4] = { 0.0f, kCentreLift[subject], kCentreZoom, 1.0f };
         memcpy(inst.a[0], a, sizeof(a));
         memcpy(inst.b[0], b, sizeof(b));
         count = 1;
@@ -369,16 +386,16 @@ void SignalVisualizer::DrawModel(Renderer& renderer, int slot, int rows, int w, 
     ctx->OMSetDepthStencilState(m_depthState.Get(), 0);
     ctx->RSSetState(m_raster.Get());
     const UINT stride = 12, offset = 0;
-    ID3D11Buffer* vb = m_meshVB.Get();
+    ID3D11Buffer* vb = model.vb.Get();
     ctx->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
-    ctx->IASetIndexBuffer(m_meshIB.Get(), m_indexFormat, 0);
+    ctx->IASetIndexBuffer(model.ib.Get(), model.indexFormat, 0);
     ctx->IASetInputLayout(m_meshLayout.Get());
     ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     ID3D11Buffer* icb = m_instanceCB.Get();
     ctx->VSSetConstantBuffers(3, 1, &icb);
     ctx->VSSetShader(m_meshVS.Get(), nullptr, 0);
     ctx->PSSetShader(m_meshPS.Get(), nullptr, 0);
-    ctx->DrawIndexedInstanced(m_indexCount, static_cast<UINT>(count), 0, 0, 0);
+    ctx->DrawIndexedInstanced(model.indexCount, static_cast<UINT>(count), 0, 0, 0);
     ctx->OMSetDepthStencilState(nullptr, 0);
     ctx->RSSetState(nullptr);
     ctx->OMSetRenderTargets(0, nullptr, nullptr);
@@ -396,23 +413,25 @@ void SignalVisualizer::Render(Renderer& renderer, float time, float dt) {
     // The model, when it's on screen: this layout, and the previous one while wiping between them.
     ID3D11RenderTargetView* hostTarget = renderer.BoundTarget();
     const int w = renderer.BoundWidth(), h = renderer.BoundHeight();
-    const bool model = m_hasModel && (m_subject == 0 || (m_morph > 0.0f && m_nextSubject == 0)) &&
-                       EnsureSceneTargets(renderer.Device(), w, h);
+    const bool modelNow = HasModel(m_subject), modelNext = m_morph > 0.0f && HasModel(m_nextSubject);
+    const bool model = (modelNow || modelNext) && EnsureSceneTargets(renderer.Device(), w, h);
     if (model) {
-        DrawModel(renderer, 0, m_rows, w, h, time, dt);
-        if (m_layoutMix < 1.0f) DrawModel(renderer, 1, m_prevRows, w, h, time, dt);
+        if (modelNow) DrawModel(renderer, 0, m_subject, m_rows, w, h, time, dt);
+        if (modelNow && m_layoutMix < 1.0f) DrawModel(renderer, 1, m_subject, m_prevRows, w, h, time, dt);
+        if (modelNext) DrawModel(renderer, 2, m_nextSubject, m_rows, w, h, time, dt);
         renderer.BindTarget(hostTarget, w, h, time, dt);
     }
 
     ID3D11Buffer* cb = m_cb.Get();
     ctx->PSSetConstantBuffers(2, 1, &cb);
-    ID3D11ShaderResourceView* srvs[2] = { model ? m_scene[0].srv.Get() : nullptr, model ? m_scene[1].srv.Get() : nullptr };
-    ctx->PSSetShaderResources(0, 2, srvs);
+    ID3D11ShaderResourceView* srvs[3] = { model ? m_scene[0].srv.Get() : nullptr, model ? m_scene[1].srv.Get() : nullptr,
+                                          model ? m_scene[2].srv.Get() : nullptr };
+    ctx->PSSetShaderResources(0, 3, srvs);
     ID3D11SamplerState* sampler = m_sampler.Get();
     if (sampler) ctx->PSSetSamplers(0, 1, &sampler);
     renderer.DrawFullscreen(m_ps.Get());
-    ID3D11ShaderResourceView* none[2] = {};
-    ctx->PSSetShaderResources(0, 2, none);
+    ID3D11ShaderResourceView* none[3] = {};
+    ctx->PSSetShaderResources(0, 3, none);
 }
 
 bool SignalVisualizer::OnKey(UINT vk) {

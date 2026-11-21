@@ -2,9 +2,9 @@
 
 // Signal: 3D subjects turning in the dark, drawn in cyberpunk glitch styles (cyber.hlsli). One sample
 // per cell (a glyph, a dither dot, an LED), so it's cheap. Subjects:
-//   0 the skull: a model (drawn instanced into sceneNow/scenePrev by signal_mesh_*.hlsl and read back
-//     here), or a distance-field skull with a hinged jaw when the exe was built without the model
-//   1 a lattice "brain"   2 a block monolith (distance functions, one ray per cell)
+//   0 the skull, 1 a gas-mask head, 2 a brain: models (drawn instanced into sceneNow/scenePrev/sceneNext by
+//     signal_mesh_*.hlsl and read back here); without them, a distance-field skull with a hinged jaw and a
+//     lattice brain (the head needs its model), one ray per cell
 // Layouts: one subject in the centre, or a scrolling grid of them filling the screen; changes wipe across
 // cell by cell. Lit hard from one side with a cool rim light, shadowed by ambient occlusion, over data rain.
 
@@ -12,7 +12,7 @@ cbuffer Signal : register(b2) {   // matches SignalConstants in SignalVisualizer
     float style;     float subject;  float cellScale;  float time;
     float yaw;       float pitch;    float jaw;        float pulse;      // jaw: 0 shut .. 1 open
     float glitch;    float flicker;  float dissolve;   float flash;      // flash: drop inversion 0..1
-    float eyes;      float morph;    float rain;       float hasMesh;    // morph: blend towards the next subject
+    float eyes;      float morph;    float rain;       float hasMesh;    // morph: blend towards the next subject; hasMesh: a bit per model
     float3 palBg;    float nextSubject;
     float3 palMid;   float layoutMix;    // 0..1: wipe from the previous layout to this one
     float3 palHi;    float spin;         // slow turning phase
@@ -22,6 +22,7 @@ cbuffer Signal : register(b2) {   // matches SignalConstants in SignalVisualizer
 
 Texture2D sceneNow : register(t0);    // the model in this layout (rgb premultiplied, a coverage; mipmapped)
 Texture2D scenePrev : register(t1);   // ...and in the previous one, during a layout wipe
+Texture2D sceneNext : register(t2);   // the next subject's model while changing to it
 SamplerState sceneSampler : register(s0);
 
 // The subject being drawn by this ray, and how it's posed (set per cell/tile before marching).
@@ -153,28 +154,10 @@ float Brain(float3 p, out float mat) {
     return min(max(s, g), core);
 }
 
-// Stacked blocks folded like a small Menger sponge.
-float Monolith(float3 p, out float mat) {
-    mat = 0.0;
-    // A tall block, carved like a Menger sponge (the construction Fractal flights' Menger halls use).
-    float3 q = p / float3(0.6, 1.1, 0.6);
-    float d = SdBox(q, float3(1.0, 1.0, 1.0), 0.02);
-    float s = 1.0;
-    [unroll] for (int i = 0; i < 3; ++i) {
-        float3 a = frac(q * s * 0.5 + 0.5) * 2.0 - 1.0;
-        s *= 3.0;
-        float3 r = abs(1.0 - 3.0 * abs(a));
-        float c = (min(max(r.x, r.y), min(max(r.y, r.z), max(r.z, r.x))) - 1.0) / s;
-        d = max(d, c);
-    }
-    return d * 0.6;   // back to world scale (conservative)
-}
-
 float Subject(int which, float3 p, out float mat) {
     float d;
-    [branch] if (which == 0) d = Skull(p, mat);
-    else if (which == 1) d = Brain(p, mat);
-    else d = Monolith(p, mat);
+    [branch] if (which <= 1) d = Skull(p, mat);
+    else d = Brain(p, mat);
     return d;
 }
 
@@ -281,9 +264,10 @@ float2 TileView(float2 sp, float rows) {
 }
 
 // The model's picture at a pixel, averaged over the cell (a mip level) so thin parts don't shimmer.
-float3 ModelScene(int layout, float2 px, float lod, float2 cell) {
+float3 ModelScene(int which, float2 px, float lod, float2 cell) {   // which: 0 now, 1 previous layout, 2 next subject
     float2 uv = px / iResolution;
-    float4 s = layout == 0 ? sceneNow.SampleLevel(sceneSampler, uv, lod) : scenePrev.SampleLevel(sceneSampler, uv, lod);
+    float4 s = which == 0 ? sceneNow.SampleLevel(sceneSampler, uv, lod) : which == 1 ? scenePrev.SampleLevel(sceneSampler, uv, lod)
+                          : sceneNext.SampleLevel(sceneSampler, uv, lod);
     return s.rgb + Rain(cell) * (1.0 - s.a);
 }
 
@@ -294,14 +278,15 @@ float3 Scene(float2 sp, float2 px, float2 cell, float lod) {
     int layout = Hash33(int3(cell, 23)).x < layoutMix ? 0 : 1;
     int a = (int)subject, b = (int)nextSubject;
     float m = morph;
-    bool model = hasMesh > 0.5;
-    if (model && m > 0.001 && (a == 0 || b == 0)) {
-        if (Hash33(int3(cell, 29)).x < smoothstep(0.0, 1.0, m)) a = b;
+    uint meshes = (uint)hasMesh;
+    bool next = false;
+    if (m > 0.001 && (((meshes >> a) & 1u) || ((meshes >> b) & 1u))) {
+        if (Hash33(int3(cell, 29)).x < smoothstep(0.0, 1.0, m)) { a = b; next = true; }
         m = 0.0;
     }
     float3 col;
-    [branch] if (model && a == 0) {
-        col = ModelScene(layout, px, lod, cell);
+    [branch] if ((meshes >> a) & 1u) {
+        col = ModelScene(next ? 2 : layout, px, lod, cell);
     } else {
         g_subjA = a; g_subjB = b; g_morph = m;
         float rows = layout == 0 ? rowsNow : rowsPrev;
