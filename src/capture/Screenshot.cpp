@@ -25,7 +25,7 @@ std::wstring Folder() {
     return folder;
 }
 
-std::wstring Save(Renderer& renderer, const RECT& region) {
+std::wstring Save(Renderer& renderer, const RECT& region, bool keepAlpha) {
     ComPtr<ID3D11Texture2D> back = renderer.BackBuffer();
     if (!back) return {};
     D3D11_TEXTURE2D_DESC bd{};
@@ -57,7 +57,13 @@ std::wstring Save(Renderer& renderer, const RECT& region) {
         const uint8_t* row = static_cast<const uint8_t*>(mapped.pData) + size_t(y) * mapped.RowPitch;
         uint8_t* out = pixels.data() + size_t(y) * w * 4;
         memcpy(out, row, size_t(w) * 4);
-        for (UINT x = 0; x < w; ++x) out[x * 4 + 3] = 255;   // opaque
+        for (UINT x = 0; x < w; ++x) {
+            uint8_t* p = out + x * 4;
+            if (!keepAlpha) { p[3] = 255; continue; }   // opaque
+            // PNG alpha is straight: undo the premultiplication (colour <= alpha, so it stays in range).
+            const unsigned a = p[3];
+            for (int c = 0; c < 3; ++c) p[c] = a ? static_cast<uint8_t>(std::min(255u, (p[c] * 255u + a / 2) / a)) : 0;
+        }
     }
     ctx->Unmap(staging.Get(), 0);
 

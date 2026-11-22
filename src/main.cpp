@@ -179,9 +179,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
 
     bool showStats = false, showHelp = false;
     bool screenshotPending = false;   // F12: saved once this frame is drawn
-    // Stream mode (O): 1 = clean output for OBS (no on-screen text, a 1920x1080 window),
-    // 2 = only the EQ bars on chroma-key green, to overlay on a stream.
-    int streamMode = 0;
+    // Stream mode (O), for OBS. All but Off hide the on-screen text and make the window 1920 x 1080:
+    // 1 clean, 2 transparent (the window is see-through where the picture is dark), 3 only the EQ bars
+    // on a transparent window, 4 only the EQ bars on chroma-key green.
+    enum StreamMode { kStreamOff, kStreamClean, kStreamTransparent, kStreamBarsTransparent, kStreamBarsGreen, kStreamModes };
+    int streamMode = kStreamOff;
+    static const wchar_t* kStreamItems[] = { L"Off", L"Clean (no on-screen text, 1920 x 1080)",
+                                             L"Transparent: see-through where it's dark", L"Equaliser bars, transparent",
+                                             L"Equaliser bars on green (chroma key)" };
+    auto barsOnly = [&] { return streamMode == kStreamBarsTransparent || streamMode == kStreamBarsGreen; };
     // Mood colour: warm for bright/energetic music, cool for calm/minor; chords nudge the hue.
     bool moodColour = settings.moodColour;
     float gradeWarmth = 0.0f, gradeHue = 0.0f, gradeHueTarget = 0.0f, gradeAmount = moodColour ? 1.0f : 0.0f;
@@ -337,17 +343,40 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         barsSinceSwitch = 0;
         overlay.ShowMessage(kSceneNames[sceneChanges], 2.5f);
     };
+    // A see-through window needs a window made for it and a composition swap chain: swap both in
+    // (the GPU device, and everything made on it, stay as they are).
+    auto setTransparent = [&](bool on) {
+        if (on == window.IsTransparent()) return true;
+        auto attach = [&] {
+            int cw, ch;
+            window.ClientSize(cw, ch);
+            return renderer.SetWindow(window.Handle(), cw, ch, window.IsTransparent());
+        };
+        if (window.Recreate(on) && attach()) return true;
+        // No composition on this PC (or the window couldn't be made): back to a normal window.
+        if (window.IsTransparent()) window.Recreate(false);
+        if (!attach()) { Fatal(L"The window could not be recreated."); PostQuitMessage(1); }
+        return false;
+    };
     auto setStreamMode = [&](int mode) {
         if (mode == streamMode) return;
-        if (streamMode == 0 && mode != 0) window.SetClientSize(1920, 1080);
-        if (mode == 0) window.RestoreSize();
+        if (streamMode == kStreamOff && mode != kStreamOff) window.SetClientSize(1920, 1080);
+        if (mode == kStreamOff) window.RestoreSize();
+        const bool transparent = mode == kStreamTransparent || mode == kStreamBarsTransparent;
+        if (!setTransparent(transparent) && transparent) {
+            mode = mode == kStreamTransparent ? kStreamClean : kStreamBarsGreen;
+            MessageBoxW(window.Handle(), L"This PC can't show a see-through window, so it's using the nearest stream mode instead.",
+                        kAppName, MB_OK | MB_ICONINFORMATION);
+        }
+        // The bars-only modes switch the bars on; leaving them puts them back as they were.
+        static bool barsBefore = false;
+        const bool wasBarsOnly = barsOnly();
         streamMode = mode;
-        if (streamMode == 2 && !eqBars.Visible()) eqBars.SetVisible(true);
-        static const wchar_t* kModes[] = { L"Stream mode off", L"Stream mode: clean (no on-screen text, 1920 x 1080 window)",
-                                           L"Stream mode: EQ bars on green (chroma key)" };
+        if (barsOnly() && !wasBarsOnly) { barsBefore = eqBars.Visible(); eqBars.SetVisible(true); }
+        if (!barsOnly() && wasBarsOnly) eqBars.SetVisible(barsBefore);
         // In stream mode on-screen text is hidden, so say it in the title bar instead.
-        window.SetTitle(streamMode ? kModes[streamMode] : kAppName);
-        if (streamMode == 0) overlay.ShowMessage(kModes[0], 1.5f);
+        window.SetTitle(streamMode ? (std::wstring(L"Stream mode: ") + kStreamItems[streamMode]).c_str() : kAppName);
+        if (streamMode == kStreamOff) overlay.ShowMessage(L"Stream mode off", 1.5f);
     };
     auto setAudioDevice = [&](const AudioDevice* device) {
         capture->SetPreferredDevice(device ? device->id : std::wstring());
@@ -379,7 +408,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             setSceneChanges((sceneChanges + 1) % 3);
             break;
         case 'W':        cycleDisplayMode(); break;
-        case 'O':        setStreamMode((streamMode + 1) % 3); break;
+        case 'O':        setStreamMode((streamMode + 1) % kStreamModes); break;
         case 'U':
             if (updater.Ready()) {
                 saveSettings();
@@ -513,8 +542,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         item(display, 'G', L"Next monitor", 'G', false, multi);
         sep(display);
         HMENU stream = CreatePopupMenu();
-        static const wchar_t* kStreamItems[] = { L"Off", L"Clean (no on-screen text, 1920 x 1080)", L"Equaliser bars on green" };
-        for (int i = 0; i < 3; ++i) radio(stream, kStream + i, kStreamItems[i], i == streamMode);
+        for (int i = 0; i < kStreamModes; ++i) radio(stream, kStream + i, kStreamItems[i], i == streamMode);
         sub(display, stream, L"Stream mode\tO");
         sub(menu, display, L"Display");
 
@@ -548,7 +576,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         if (cmd == 0) return;
         if (cmd == 1) window.onKeyDown(VK_ESCAPE);
         else if (cmd == kPrevTrack) { nowPlaying.Send(NowPlaying::Command::Previous); overlay.ShowMessage(L"Previous track", 1.2f); }
-        else if (cmd >= kStream && cmd < kStream + 3) setStreamMode(cmd - kStream);
+        else if (cmd >= kStream && cmd < kStream + static_cast<UINT>(kStreamModes)) setStreamMode(cmd - kStream);
         else if (cmd >= kDisplay && cmd < kDisplay + 3) setDisplayMode(cmd - kDisplay);
         else if (cmd >= kDevice && cmd < kDevice + 100) setAudioDevice(cmd == kDevice ? nullptr : &devices[cmd - kDevice - 1]);
         else if (cmd >= kFilter && cmd < kFilter + 100) { filters.Select(static_cast<int>(cmd - kFilter) - 1); overlay.ShowMessage(filters.Message(), 1.5f); }
@@ -685,7 +713,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         renderer.SetGrade(gradeWarmth, gradeHue, gradeAmount);
         filters.Update(audio, dt);
         renderer.UploadAudio(audio);
-        if (streamMode == 2) renderer.ClearBackBuffer(0.0f, 1.0f, 0.0f);   // bars on green: no visualiser
+        if (streamMode == kStreamBarsGreen) renderer.ClearBackBuffer(0.0f, 1.0f, 0.0f);   // bars only: no visualiser
+        else if (streamMode == kStreamBarsTransparent) renderer.ClearBackBuffer();         // (black: see-through)
         else host.Render(renderer, static_cast<float>(time), dt, &filters);   // leaves the back buffer bound
 
         float accentLo[3], accentHi[3];
@@ -695,11 +724,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         renderer.BindBackBuffer(host.HasRegions() ? &primary : nullptr);
         eqBars.Render(renderer);
         recorder.CaptureFrame(renderer);   // what's recorded: the visuals and bars, not the text overlays
-        if (screenshotPending) {   // likewise the screenshot
+        auto takeScreenshot = [&](bool keepAlpha) {
             screenshotPending = false;
-            const std::wstring shot = Screenshot::Save(renderer, primary);
+            const std::wstring shot = Screenshot::Save(renderer, primary, keepAlpha);
             overlay.ShowMessage(shot.empty() ? std::wstring(L"Couldn't save the screenshot") : L"Screenshot saved to " + Recorder::ShortPath(shot), 3.0f);
-        }
+        };
+        // Likewise the screenshot (a transparent window's waits for its alpha, below, and keeps it).
+        if (screenshotPending && !window.IsTransparent()) takeScreenshot(false);
         if (std::wstring note = recorder.TakeMessage(); !note.empty()) overlay.ShowMessage(note, 4.0f);
         if (std::wstring note = updater.TakeMessage(); !note.empty()) overlay.ShowMessage(note, 4.0f);
         if (nowPlaying.TakeNoPlayer()) overlay.ShowMessage(L"No music player to control", 2.5f);
@@ -738,6 +769,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             }
         }
 
+        renderer.FinishTransparentFrame();   // transparent window: brightness becomes alpha (else nothing)
+        if (screenshotPending) takeScreenshot(true);   // a PNG with the window's transparency
         switch (renderer.Present()) {
         case PresentResult::Ok:
             break;

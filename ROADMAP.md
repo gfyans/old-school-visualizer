@@ -4,14 +4,12 @@ Where this is going next, in order. ✅ = done.
 
 ## Up next
 
-1. **Transparent window for OBS.** True per-pixel alpha through DirectComposition instead of chroma key: soft glow
-   over the game with no green fringe, and any visualiser can be overlaid, not just the equaliser bars.
-2. **Synced lyrics.** Time-coded lyrics for the playing track from a free lyrics database, set as kinetic typography
+1. **Synced lyrics.** Time-coded lyrics for the playing track from a free lyrics database, set as kinetic typography
    in the scene: words punch in on the beat, explode on drops, and glitch in Signal.
-3. **Director mode.** Choreograph the whole song from its structure: a calm scene for the intro, a tunnel for the
+2. **Director mode.** Choreograph the whole song from its structure: a calm scene for the intro, a tunnel for the
    build, Detonation on the drop, the aurora for the outro. A music video, made live.
-4. **Album-art scenes.** The cover shatters into 3D voxels that pulse, orbit and reassemble on the downbeat.
-5. **Phone remote.** Scan a QR code and your phone becomes a controller on your home network: switch scenes, lock
+3. **Album-art scenes.** The cover shatters into 3D voxels that pulse, orbit and reassemble on the downbeat.
+4. **Phone remote.** Scan a QR code and your phone becomes a controller on your home network: switch scenes, lock
    looks, trigger the quasar, supernova or detonation.
 
 ## Later
@@ -46,4 +44,5 @@ Where this is going next, in order. ✅ = done.
   ✅ transitions with character; ✅ filters over every scene (`X`).
 - **Ease of use:** ✅ right-click menu with every setting; ✅ short help with the current visualiser's keys.
 - **Beyond the screen:** ✅ multi-monitor; ✅ MP4 recording and instant replay; ✅ stream mode for OBS;
+  ✅ transparent window for OBS (DirectComposition alpha from the picture's brightness, visualiser or bars only);
   ✅ automatic updates.

@@ -1,4 +1,5 @@
 #include "render/Renderer.h"
+#include "g_alpha_ps.h"
 #include "g_composite_ps.h"
 #include "g_fullscreen_vs.h"
 
@@ -35,8 +36,9 @@ bool CreateDynamicCB(ID3D11Device* device, UINT size, ID3D11Buffer** out) {
 }
 } // namespace
 
-bool Renderer::Init(HWND hwnd, int width, int height) {
+bool Renderer::Init(HWND hwnd, int width, int height, bool transparent) {
     m_hwnd = hwnd;
+    m_transparent = transparent;
     m_width = width > 0 ? width : 1;
     m_height = height > 0 ? height : 1;
     if (!CreateDevice() || !CreateSwapChain() || !CreateTargets() || !CreatePipeline()) return false;
@@ -46,25 +48,22 @@ bool Renderer::Init(HWND hwnd, int width, int height) {
 
 bool Renderer::Reinit() {
     Shutdown();
-    return Init(m_hwnd, m_width, m_height);
+    return Init(m_hwnd, m_width, m_height, m_transparent);
 }
 
 void Renderer::Shutdown() {
-    if (m_d2dContext) m_d2dContext->SetTarget(nullptr);
-    m_d2dTarget.Reset();
+    ReleaseSwapChain();
     m_d2dContext.Reset();
     m_d2dDevice.Reset();
     m_d2dFactory.Reset();
     if (m_context) m_context->ClearState();
+    m_alphaPS.Reset();
     m_compositeCB.Reset();
     m_audioCB.Reset();
     m_frameCB.Reset();
     m_linearClamp.Reset();
     m_compositePS.Reset();
     m_fullscreenVS.Reset();
-    m_backBufferRTV.Reset();
-    if (m_frameWait) { CloseHandle(m_frameWait); m_frameWait = nullptr; }
-    m_swapChain.Reset();
     m_context.Reset();
     m_device.Reset();
 }
@@ -109,9 +108,24 @@ bool Renderer::CreateSwapChain() {
     desc.Flags = kSwapChainFlags;
 
     ComPtr<IDXGISwapChain1> sc1;
-    if (FAILED(factory->CreateSwapChainForHwnd(m_device.Get(), m_hwnd, &desc, nullptr, nullptr, &sc1)) ||
-        FAILED(sc1.As(&m_swapChain)))
+    if (m_transparent) {
+        // Only composition swap chains carry alpha to the desktop: DirectComposition shows this one
+        // as the window's content (the window has no redirection surface underneath).
+        desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+        if (FAILED(factory->CreateSwapChainForComposition(m_device.Get(), &desc, nullptr, &sc1)) ||
+            FAILED(sc1.As(&m_swapChain)) ||
+            FAILED(DCompositionCreateDevice(dxgiDevice.Get(), IID_PPV_ARGS(&m_dcompDevice))) ||
+            FAILED(m_dcompDevice->CreateTargetForHwnd(m_hwnd, TRUE, &m_dcompTarget)) ||
+            FAILED(m_dcompDevice->CreateVisual(&m_dcompVisual)) ||
+            FAILED(m_dcompVisual->SetContent(m_swapChain.Get())) ||
+            FAILED(m_dcompTarget->SetRoot(m_dcompVisual.Get())) ||
+            FAILED(m_dcompDevice->Commit()))
+            return false;
+    } else if (FAILED(factory->CreateSwapChainForHwnd(m_device.Get(), m_hwnd, &desc, nullptr, nullptr, &sc1)) ||
+               FAILED(sc1.As(&m_swapChain))) {
         return false;
+    }
 
     // We handle Alt+Enter ourselves (borderless fullscreen), not DXGI's exclusive mode.
     factory->MakeWindowAssociation(m_hwnd, DXGI_MWA_NO_ALT_ENTER);
@@ -119,6 +133,34 @@ bool Renderer::CreateSwapChain() {
     m_swapChain->SetMaximumFrameLatency(1);
     m_frameWait = m_swapChain->GetFrameLatencyWaitableObject();
     return m_frameWait != nullptr;
+}
+
+void Renderer::ReleaseSwapChain() {
+    if (m_d2dContext) m_d2dContext->SetTarget(nullptr);
+    m_d2dTarget.Reset();
+    if (m_context) {
+        m_context->OMSetRenderTargets(0, nullptr, nullptr);
+        m_boundRTV = nullptr;
+    }
+    m_backBufferRTV.Reset();
+    m_alphaCopySRV.Reset();
+    m_alphaCopy.Reset();
+    if (m_frameWait) { CloseHandle(m_frameWait); m_frameWait = nullptr; }
+    m_dcompVisual.Reset();
+    m_dcompTarget.Reset();
+    m_dcompDevice.Reset();
+    m_swapChain.Reset();
+    if (m_context) m_context->Flush();   // let the old swap chain go now, before its window does
+}
+
+bool Renderer::SetWindow(HWND hwnd, int width, int height, bool transparent) {
+    if (!m_device) return false;
+    ReleaseSwapChain();
+    m_hwnd = hwnd;
+    m_transparent = transparent;
+    m_width = width > 0 ? width : 1;
+    m_height = height > 0 ? height : 1;
+    return CreateSwapChain() && CreateTargets();
 }
 
 bool Renderer::CreateTargets() {
@@ -129,7 +171,8 @@ bool Renderer::CreateTargets() {
 
 bool Renderer::CreatePipeline() {
     if (FAILED(m_device->CreateVertexShader(g_fullscreen_vs, sizeof(g_fullscreen_vs), nullptr, &m_fullscreenVS)) ||
-        FAILED(m_device->CreatePixelShader(g_composite_ps, sizeof(g_composite_ps), nullptr, &m_compositePS)))
+        FAILED(m_device->CreatePixelShader(g_composite_ps, sizeof(g_composite_ps), nullptr, &m_compositePS)) ||
+        FAILED(m_device->CreatePixelShader(g_alpha_ps, sizeof(g_alpha_ps), nullptr, &m_alphaPS)))
         return false;
 
     D3D11_SAMPLER_DESC s{};
@@ -162,6 +205,8 @@ void Renderer::Resize(int width, int height) {
     m_d2dTarget.Reset();
     m_context->OMSetRenderTargets(0, nullptr, nullptr);
     m_backBufferRTV.Reset();
+    m_alphaCopySRV.Reset();
+    m_alphaCopy.Reset();
     m_context->Flush();
     m_swapChain->ResizeBuffers(0, m_width, m_height, DXGI_FORMAT_UNKNOWN, kSwapChainFlags);
     CreateTargets();
@@ -239,6 +284,34 @@ void Renderer::ClearBackBuffer(float r, float g, float b) {
     if (m_backBufferRTV) m_context->ClearRenderTargetView(m_backBufferRTV.Get(), colour);
 }
 
+void Renderer::FinishTransparentFrame() {
+    if (!m_transparent || !m_backBufferRTV || !m_alphaPS) return;
+    ComPtr<ID3D11Texture2D> back = BackBuffer();
+    if (!back) return;
+    if (!m_alphaCopy) {
+        D3D11_TEXTURE2D_DESC d{};
+        back->GetDesc(&d);
+        d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        d.MiscFlags = 0;
+        d.CPUAccessFlags = 0;
+        d.Usage = D3D11_USAGE_DEFAULT;
+        if (FAILED(m_device->CreateTexture2D(&d, nullptr, &m_alphaCopy)) ||
+            FAILED(m_device->CreateShaderResourceView(m_alphaCopy.Get(), nullptr, &m_alphaCopySRV))) {
+            m_alphaCopy.Reset();
+            return;
+        }
+    }
+    m_context->OMSetRenderTargets(0, nullptr, nullptr);   // (the back buffer may still be bound)
+    m_context->CopyResource(m_alphaCopy.Get(), back.Get());
+    BindBackBuffer();
+    m_context->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
+    ID3D11ShaderResourceView* srv = m_alphaCopySRV.Get();
+    m_context->PSSetShaderResources(0, 1, &srv);
+    DrawFullscreen(m_alphaPS.Get());
+    ID3D11ShaderResourceView* none = nullptr;
+    m_context->PSSetShaderResources(0, 1, &none);
+}
+
 void Renderer::Composite(const CompositeLayer& a, const CompositeLayer* b, float mix, int style, float seed, const RECT* region,
                          const RenderTarget* into) {
     if (into) {
@@ -277,7 +350,7 @@ void Renderer::Composite(const CompositeLayer& a, const CompositeLayer* b, float
 }
 
 ID2D1DeviceContext* Renderer::BeginOverlay() {
-    if (!m_d2dContext) return nullptr;
+    if (!m_d2dContext || !m_swapChain) return nullptr;
     if (!m_d2dTarget) {
         ComPtr<IDXGISurface> surface;
         const D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
@@ -300,6 +373,7 @@ void Renderer::EndOverlay() {
 }
 
 PresentResult Renderer::Present() {
+    if (!m_swapChain) return PresentResult::Occluded;   // between windows (SetWindow failed): nothing to show
     const HRESULT hr = m_swapChain->Present(1, 0);   // vsync (if the driver honours it)
     if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) return PresentResult::DeviceLost;
     if (hr == DXGI_STATUS_OCCLUDED) return PresentResult::Occluded;

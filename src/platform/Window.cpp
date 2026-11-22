@@ -27,10 +27,45 @@ bool Window::Create(HINSTANCE instance, const wchar_t* title, int clientWidth, i
     RECT r{ 0, 0, clientWidth, clientHeight };
     AdjustWindowRectExForDpi(&r, style, FALSE, 0, GetDpiForSystem());
 
+    m_instance = instance;
     m_hwnd = CreateWindowExW(0, kClassName, title, style,
         CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
         nullptr, nullptr, instance, this);
     return m_hwnd != nullptr;
+}
+
+bool Window::Recreate(bool transparent) {
+    if (transparent == m_transparent) return true;
+    const HWND old = m_hwnd;
+    wchar_t title[256] = {};
+    GetWindowTextW(old, title, ARRAYSIZE(title));
+    RECT r{};
+    GetWindowRect(old, &r);
+    WINDOWPLACEMENT placement{ sizeof(placement) };
+    GetWindowPlacement(old, &placement);
+    const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(old, GWL_STYLE)) & ~WS_VISIBLE;
+    DWORD exStyle = static_cast<DWORD>(GetWindowLongPtrW(old, GWL_EXSTYLE));
+    exStyle = transparent ? (exStyle | WS_EX_NOREDIRECTIONBITMAP) : (exStyle & ~WS_EX_NOREDIRECTIONBITMAP);
+
+    // The new window's WM_NCCREATE points m_hwnd at it; the old one stops talking to this object
+    // first, so its teardown neither reaches the callbacks nor posts WM_QUIT.
+    SetWindowLongPtrW(old, GWLP_USERDATA, 0);
+    const HWND created = CreateWindowExW(exStyle, kClassName, title, style, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                                         nullptr, nullptr, m_instance, this);
+    if (!created) {
+        m_hwnd = old;
+        SetWindowLongPtrW(old, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+        return false;
+    }
+    m_transparent = transparent;
+    if (!m_fullscreen) {   // keep the restore position and maximised state too
+        placement.showCmd = placement.showCmd == SW_SHOWMAXIMIZED ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+        SetWindowPlacement(created, &placement);
+    }
+    ShowWindow(created, m_fullscreen ? SW_SHOW : placement.showCmd);
+    SetForegroundWindow(created);
+    DestroyWindow(old);
+    return true;
 }
 
 void Window::Show(bool maximized) {

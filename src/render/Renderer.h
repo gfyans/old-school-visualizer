@@ -1,6 +1,7 @@
 #pragma once
 #include <d2d1_1.h>
 #include <d3d11.h>
+#include <dcomp.h>
 #include <dxgi1_3.h>
 #include <cstring>
 #include <wrl/client.h>
@@ -42,15 +43,24 @@ struct CompositeLayer {
 enum class PresentResult { Ok, Occluded, DeviceLost };
 
 // Owns the D3D11 device, swap chain and the Direct2D context used for text overlays.
-// Flip-model swap chain with a frame-latency waitable object.
+// Flip-model swap chain with a frame-latency waitable object. Transparent: a DirectComposition
+// swap chain with premultiplied alpha, for a window created with WS_EX_NOREDIRECTIONBITMAP, so
+// what's black in the frame shows the desktop (or the game) behind.
 class Renderer {
 public:
     ~Renderer() { Shutdown(); }
 
-    bool Init(HWND hwnd, int width, int height);
+    bool Init(HWND hwnd, int width, int height, bool transparent = false);
     bool Reinit();          // after device loss
     void Shutdown();
     void Resize(int width, int height);
+    // A new swap chain for another window (the device and everything made on it stay). For a
+    // transparent window, call FinishTransparentFrame() just before each Present().
+    bool SetWindow(HWND hwnd, int width, int height, bool transparent);
+    bool Transparent() const { return m_transparent; }
+    // Transparent only: turns the finished frame's brightness into its alpha (shaders/alpha_ps.hlsl),
+    // so black is see-through. Draw everything first, recording and screenshots included (they stay opaque).
+    void FinishTransparentFrame();
 
     void WaitForNextFrame();
     void UploadAudio(const AudioFeatures& audio);   // once per frame; stays bound at b1
@@ -94,11 +104,13 @@ public:
 private:
     bool CreateDevice();
     bool CreateSwapChain();
+    void ReleaseSwapChain();
     bool CreateTargets();
     bool CreatePipeline();
     bool CreateD2D();
 
     HWND m_hwnd = nullptr;
+    bool m_transparent = false;
     int m_width = 0, m_height = 0;
     ID3D11RenderTargetView* m_boundRTV = nullptr;   // not owned
     int m_boundW = 0, m_boundH = 0;
@@ -109,6 +121,15 @@ private:
     ComPtr<IDXGISwapChain2> m_swapChain;
     HANDLE m_frameWait = nullptr;
     ComPtr<ID3D11RenderTargetView> m_backBufferRTV;
+
+    // Transparent windows: the composition tree that shows the swap chain, and the copy of the
+    // frame the alpha pass reads (it can't read the back buffer it's writing).
+    ComPtr<IDCompositionDevice> m_dcompDevice;
+    ComPtr<IDCompositionTarget> m_dcompTarget;
+    ComPtr<IDCompositionVisual> m_dcompVisual;
+    ComPtr<ID3D11PixelShader> m_alphaPS;
+    ComPtr<ID3D11Texture2D> m_alphaCopy;
+    ComPtr<ID3D11ShaderResourceView> m_alphaCopySRV;
 
     ComPtr<ID3D11VertexShader> m_fullscreenVS;
     ComPtr<ID3D11PixelShader> m_compositePS;

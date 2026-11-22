@@ -42,6 +42,7 @@ endfunction()
 
 compile_shader(fullscreen_vs.hlsl vs_5_0 g_fullscreen_vs)
 compile_shader(composite_ps.hlsl  ps_5_0 g_composite_ps)
+compile_shader(alpha_ps.hlsl      ps_5_0 g_alpha_ps)
 compile_shader(spectrum_ps.hlsl   ps_5_0 g_spectrum_ps)
 compile_shader(nebula_ps.hlsl     ps_5_0 g_nebula_ps)
 compile_shader(nebula_taa_ps.hlsl ps_5_0 g_nebula_taa_ps)
@@ -142,7 +143,7 @@ if(SIGNAL_RC_DEPENDS)
 endif()
 
 target_include_directories(Visualizer PRIVATE src ${SHADER_OUT})
-target_link_libraries(Visualizer PRIVATE audio_analysis d3d11 dxgi d2d1 dwrite ole32 shell32 windowsapp mfplat mfreadwrite mfuuid winhttp bcrypt windowscodecs)
+target_link_libraries(Visualizer PRIVATE audio_analysis d3d11 dxgi d2d1 dcomp dwrite ole32 shell32 windowsapp mfplat mfreadwrite mfuuid winhttp bcrypt windowscodecs)
 target_compile_definitions(Visualizer PRIVATE VISUALIZER_VERSION="${PROJECT_VERSION}")
 set_source_files_properties(src/media/NowPlaying.cpp PROPERTIES COMPILE_OPTIONS /bigobj)   # C++/WinRT
 target_compile_definitions(Visualizer PRIVATE ${COMMON_DEFS})

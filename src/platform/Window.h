@@ -35,6 +35,13 @@ public:
     bool IsFullscreen() const { return m_fullscreen; }
     bool IsMinimized() const { return m_minimized; }
 
+    // Swaps in a new window at the same place, size and state, with (or without) a see-through
+    // client area: transparent windows have no redirection surface, so a DirectComposition swap
+    // chain's alpha shows the desktop behind. Only possible at creation, hence a new window. The
+    // caller must point its swap chain at the new Handle(). Returns false (old window kept) on failure.
+    bool Recreate(bool transparent);
+    bool IsTransparent() const { return m_transparent; }
+
     HWND Handle() const { return m_hwnd; }
     void ClientSize(int& w, int& h) const;
     void SetTitle(const wchar_t* title) { SetWindowTextW(m_hwnd, title); }
@@ -59,6 +66,8 @@ private:
     POINT m_lastMousePos{ -100000, -100000 };
 
     HWND m_hwnd = nullptr;
+    HINSTANCE m_instance = nullptr;
+    bool m_transparent = false;
     bool m_fullscreen = false;
     bool m_minimized = false;
     LONG_PTR m_savedStyle = 0;
