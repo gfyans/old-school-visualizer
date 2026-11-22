@@ -21,6 +21,7 @@
 #include "viz/fractal/FractalVisualizer.h"
 #include "viz/signal/SignalVisualizer.h"
 #include "viz/detonation/DetonationVisualizer.h"
+#include "viz/glasscity/GlassCityVisualizer.h"
 #include "viz/spectrum/SpectrumVisualizer.h"
 #include "g_filter_ascii_ps.h"
 #include "g_filter_dither_ps.h"
@@ -54,6 +55,7 @@ void RegisterVisualizers(VisualizerHost& host) {
     host.Add(std::make_unique<FractalVisualizer>());
     host.Add(std::make_unique<SignalVisualizer>());
     host.Add(std::make_unique<DetonationVisualizer>());
+    host.Add(std::make_unique<GlassCityVisualizer>());
     host.Add(std::make_unique<SpectrumVisualizer>());
 }
 

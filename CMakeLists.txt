@@ -68,6 +68,8 @@ compile_shader(signal_ps.hlsl        ps_5_0 g_signal_ps)
 compile_shader(signal_mesh_vs.hlsl   vs_5_0 g_signal_mesh_vs)
 compile_shader(signal_mesh_ps.hlsl   ps_5_0 g_signal_mesh_ps)
 compile_shader(detonation_ps.hlsl    ps_5_0 g_detonation_ps)
+compile_shader(glasscity_ps.hlsl     ps_5_0 g_glasscity_ps)
+compile_shader(glasscity_post_ps.hlsl ps_5_0 g_glasscity_post_ps)
 # Filters (X): one pixel shader each, registered in main.cpp (RegisterFilters).
 foreach(filter ascii dither led scan vhs polaroid halftone thermal)
     compile_shader(filter_${filter}_ps.hlsl ps_5_0 g_filter_${filter}_ps)
@@ -109,6 +111,7 @@ add_executable(Visualizer WIN32
     src/viz/fractal/FractalVisualizer.cpp
     src/viz/signal/SignalVisualizer.cpp
     src/viz/detonation/DetonationVisualizer.cpp
+    src/viz/glasscity/GlassCityVisualizer.cpp
     src/capture/Recorder.cpp
     src/update/Updater.cpp
     src/media/NowPlaying.cpp

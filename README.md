@@ -24,6 +24,7 @@ It's one small `.exe`. There's no installer, and it keeps itself up to date.
 * **Fractal flights**: a flight through endless fractals.
 * **Signal**: cyberpunk glitch art.
 * **Detonation**: a city at night, waiting for the drop.
+* **Glass City**: a flight through cyberspace, a city of glass with currents of light running through it.
 * **Spectrum**: a classic spectrum analyser.
 
 ## Using it
