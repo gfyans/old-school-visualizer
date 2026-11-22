@@ -470,6 +470,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         item(vizMenu, VK_RIGHT, L"Next", VK_RIGHT);
         sub(menu, vizMenu, L"Visualiser");
 
+        HMENU filterMenu = CreatePopupMenu();
+        radio(filterMenu, kFilter, L"Off", !filters.Active());
+        for (int i = 0; i < filters.Count() && i < 99; ++i) radio(filterMenu, kFilter + 1 + i, filters.At(i).Name(), i == filters.Current());
+        sub(menu, filterMenu, L"Filter\tX");
+
         HMENU sceneMenu = CreatePopupMenu();
         static const wchar_t* kSceneItems[] = { L"Off", L"A new visualiser with each song", L"Random: a new scene and look every minute or so" };
         for (int i = 0; i < 3; ++i) radio(sceneMenu, kScene + i, kSceneItems[i], i == sceneChanges);
@@ -490,10 +495,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         sep(menu);
 
         HMENU effects = CreatePopupMenu();
-        HMENU filterMenu = CreatePopupMenu();
-        radio(filterMenu, kFilter, L"Off", !filters.Active());
-        for (int i = 0; i < filters.Count() && i < 99; ++i) radio(filterMenu, kFilter + 1 + i, filters.At(i).Name(), i == filters.Current());
-        sub(effects, filterMenu, L"Filter\tX");
         item(effects, 'B', L"Equaliser bars", 'B', eqBars.Visible());
         item(effects, 'K', L"Mood colour", 'K', moodColour);
         item(effects, 'A', L"Album-art colours", 'A', albumColours);

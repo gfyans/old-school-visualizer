@@ -1,7 +1,7 @@
 # Adding a filter
 
 A filter is a look laid over whichever visualiser is showing: ASCII, VHS, Thermal and so on. `X` cycles through them
-and they're listed under **Effects → Filter** in the right-click menu.
+and they're listed under **Filter** in the right-click menu.
 
 Most filters are a single pixel shader. The host draws the finished scene into a texture, and your shader turns it
 into the picture on screen.
