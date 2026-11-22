@@ -4,16 +4,14 @@ Where this is going next, in order. ✅ = done.
 
 ## Up next
 
-1. **Harder rhythms.** A look-ahead dynamic-programming phase stage for thrash metal and syncopated techno: score
-   whole chains of beats against the tempo, so dense double-kick and off-beat accents can't drag the grid off.
-2. **Transparent window for OBS.** True per-pixel alpha through DirectComposition instead of chroma key: soft glow
+1. **Transparent window for OBS.** True per-pixel alpha through DirectComposition instead of chroma key: soft glow
    over the game with no green fringe, and any visualiser can be overlaid, not just the equaliser bars.
-3. **Synced lyrics.** Time-coded lyrics for the playing track from a free lyrics database, set as kinetic typography
+2. **Synced lyrics.** Time-coded lyrics for the playing track from a free lyrics database, set as kinetic typography
    in the scene: words punch in on the beat, explode on drops, and glitch in Signal.
-4. **Director mode.** Choreograph the whole song from its structure: a calm scene for the intro, a tunnel for the
+3. **Director mode.** Choreograph the whole song from its structure: a calm scene for the intro, a tunnel for the
    build, Detonation on the drop, the aurora for the outro. A music video, made live.
-5. **Album-art scenes.** The cover shatters into 3D voxels that pulse, orbit and reassemble on the downbeat.
-6. **Phone remote.** Scan a QR code and your phone becomes a controller on your home network: switch scenes, lock
+4. **Album-art scenes.** The cover shatters into 3D voxels that pulse, orbit and reassemble on the downbeat.
+5. **Phone remote.** Scan a QR code and your phone becomes a controller on your home network: switch scenes, lock
    looks, trigger the quasar, supernova or detonation.
 
 ## Later
@@ -22,6 +20,8 @@ Where this is going next, in order. ✅ = done.
 - **Presets and favourites.** Save looks you love.
 - **Screensaver build.** The same exe as a `.scr`.
 - **More worlds for Fractal flights.** A Mandelbulb set piece and a working Kleinian cave world.
+- **Kick weighting.** When pulses are close, give the low bands more say in which one is the beat, so a grid that
+  started on the off-beat during an intro moves to the kick within seconds of it arriving, not ~15 s.
 
 ## Parked
 - **RGB sync.** Drive SteelSeries / Razer / Hue lighting from the same analysis and palette.
@@ -33,7 +33,8 @@ Where this is going next, in order. ✅ = done.
 ## Done
 - **Listening:** ✅ tempo and beat-grid prediction; ✅ build-ups and drops; ✅ tuned on real recordings; ✅ faster
   lock after beatless intros; ✅ tempo-driven pace; ✅ instrument detection (kick, snare, hats, voice, pads); ✅ key,
-  chords and mood colour; ✅ now playing with album-art palettes; ✅ equaliser bars.
+  chords and mood colour; ✅ now playing with album-art palettes; ✅ equaliser bars; ✅ harder rhythms (beat chains
+  by dynamic programming hold the grid steady in thrash and syncopated techno: ~16-24 grid jumps a minute down to ~2).
 - **Visualisers:** ✅ Nebula (TAA, light scattering, bloom, pulsar, supernova, directed flight); ✅ Neon Grid;
   ✅ Liquid (a fluid simulation: Ink, Neon and Chrome); ✅ Oscilloscope; ✅ Aurora; ✅ Galaxy; ✅ Fractal flights; ✅ Signal (skull, gas-mask head and brain models,
   centre and grid layouts, ASCII / dither / LED / scan lines); ✅ Detonation (city, dome, void, crater, camera director; blasts on drops,
