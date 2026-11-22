@@ -36,8 +36,10 @@ Where this is going next, in order. ✅ = done.
   ✅ Liquid (a fluid simulation: Ink, Neon and Chrome); ✅ Oscilloscope; ✅ Aurora; ✅ Galaxy; ✅ Fractal flights; ✅ Signal (skull, gas-mask head and brain models,
   centre and grid layouts, ASCII / dither / LED / scan lines); ✅ Detonation (city, dome, void, crater, camera director; blasts on drops,
   released build-ups and big phrases; a dome that punches with the kicks);
-  ✅ Spectrum (Studio and Radial looks; physical peak caps and drop fireworks).
-- **Feel:** ✅ auto-cycle; ✅ Random scene changes (a new scene and look every minute or so, on the phrase);
+  ✅ Spectrum (Studio and Radial looks; physical peak caps and drop fireworks);
+  ✅ Glass City (a flight through a cyberspace city of glass; Overdrive on big moments).
+- **Feel:** ✅ one shared big moment for every visualiser (drops, released build-ups and big phrases, about one
+  every 20-25 s in drum-driven songs); ✅ auto-cycle; ✅ Random scene changes (a new scene and look every minute or so, on the phrase);
   ✅ transitions with character; ✅ filters over every scene (`X`).
 - **Ease of use:** ✅ right-click menu with every setting; ✅ short help with the current visualiser's keys.
 - **Beyond the screen:** ✅ multi-monitor; ✅ MP4 recording and instant replay; ✅ stream mode for OBS;
