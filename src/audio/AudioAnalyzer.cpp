@@ -11,6 +11,12 @@ constexpr float kFloorDb = -50.0f;     // auto-gain never boosts beyond this (ke
 constexpr float kStructureWarmUp = 4.0f;   // seconds of audio before build-ups/drops are judged
 constexpr float kRhythmMemory = 15.0f;     // how long drums keep structure detection on
 constexpr float kDrumsPresent = 0.36f;     // percussiveness above this = drums are playing
+// Big moments in a big section without a drop: how loud the section must be (drum-driven songs sit at
+// intensity 0.4-0.6, solo piano ~0.25) and how long since the last big moment.
+constexpr float kPeakIntensity = 0.38f;
+constexpr float kPeakGap = 22.0f;          // on a phrase downbeat when the beat grid is locked
+constexpr float kPeakGapNoGrid = 30.0f;
+constexpr int kPeakPhraseBeats = 16;       // a phrase: 4 bars
 
 // Exponential approach with separate rise/fall time constants (seconds); frame-rate independent.
 float Smooth(float current, float target, float dt, float attack, float release) {
@@ -438,6 +444,9 @@ void AudioAnalyzer::UpdateStructure(float bassPower, float highPower, float tota
         m_activeTime = 0.0f;
         m_structureInit = false;   // the next song starts with fresh baselines
         m_highCount = 0;
+        m_sinceHit = 0.0f;   // a new song gets the full gap before a phrase hit
+        m_buildPeak = 0.0f;
+        m_phraseBeats = 0;
         f.buildUp = Smooth(f.buildUp, 0.0f, dt, 1.0f, 0.5f);
         return;
     }
@@ -476,7 +485,7 @@ void AudioAnalyzer::UpdateStructure(float bassPower, float highPower, float tota
         slope = (n * sxy - sx * sy) / std::max(n * sxx - sx * sx, 1e-6f);
     }
 
-    const bool bassAbsent = m_bassShort < m_bassRef - 9.0f;
+    const bool bassAbsent = m_bassShort < m_bassRef - 7.5f;
     m_bassAbsentTime = bassAbsent ? m_bassAbsentTime + dt : 0.0f;
 
     // Build-ups and drops only exist in music with drums. Remember drums for 15 s, which
@@ -494,13 +503,30 @@ void AudioAnalyzer::UpdateStructure(float bassPower, float highPower, float tota
     f.buildUp = Smooth(f.buildUp, build, dt, 1.0f, 0.6f);
 
     // Drop: the bass slams back in after being away, or a big jump in level after a build.
-    const bool bassReturn = !bassAbsent && m_lastBassAbsent >= 1.5f;
-    const bool levelJump = f.buildUp > 0.3f && !bassAbsent && m_levelFast > m_levelSlow + 6.0f;
-    if (warmedUp && (bassReturn || levelJump) && m_dropCooldown <= 0.0f) {
+    const bool bassReturn = !bassAbsent && m_lastBassAbsent >= 1.0f;
+    const bool levelJump = f.buildUp > 0.25f && !bassAbsent && m_levelFast > m_levelSlow + 5.0f;
+    // A big build-up letting go without a clear drop (while the music carries on, not fading out).
+    m_buildPeak = std::max(m_buildPeak, f.buildUp);
+    const bool released = m_buildPeak > 0.4f && f.buildUp < 0.15f && m_levelFast > m_levelSlow - 3.0f;
+    if (m_buildPeak > 0.0f && f.buildUp < 0.05f && !released) m_buildPeak = 0.0f;
+    // A big section that hasn't had a big moment for a while: the start of the next phrase (4 bars
+    // since the last one, on the downbeat), or after a while without a beat grid.
+    m_sinceHit += dt;
+    const bool gridLocked = f.tempoConfidence > 0.4f;
+    if (f.gridBeat != m_lastGridBeat) { m_lastGridBeat = f.gridBeat; if (gridLocked) ++m_phraseBeats; }
+    const bool onDownbeat = f.barPhase < m_lastBarPhase;
+    m_lastBarPhase = f.barPhase;
+    // (Not during a build-up: that saves the moment for the drop.)
+    const bool peak = f.intensity > kPeakIntensity && f.buildUp < 0.2f &&
+                      (gridLocked ? onDownbeat && m_phraseBeats >= kPeakPhraseBeats && m_sinceHit > kPeakGap : m_sinceHit > kPeakGapNoGrid);
+    if (warmedUp && (bassReturn || levelJump || released || peak) && m_dropCooldown <= 0.0f) {
         f.drop = 1.0f;
         ++f.dropCount;
         f.buildUp = 0.0f;
         m_dropCooldown = 6.0f;
+        m_sinceHit = 0.0f;
+        m_buildPeak = 0.0f;
+        m_phraseBeats = 0;
     }
     m_lastBassAbsent = m_bassAbsentTime;
 }

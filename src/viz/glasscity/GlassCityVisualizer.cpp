@@ -226,16 +226,10 @@ void GlassCityVisualizer::Update(const AudioFeatures& audio, float dt) {
     const bool onBeat3 = m_lastBarPhase < 0.5f && audio.barPhase >= 0.5f;
     m_lastBarPhase = audio.barPhase;
 
-    // Overdrive: on a drop; when a big build-up lets go; or after a long big stretch without either.
+    // Overdrive: on the big moment every visualiser shares (AudioFeatures::drop), or Q.
     bool fire = m_fire;
     m_fire = false;
     if (audio.dropCount != m_lastDrop) { m_lastDrop = audio.dropCount; fire = true; }
-    if (!audio.silent && m_hyper < 0.1f) {
-        m_peakBuild = std::max(m_peakBuild, m_buildUp);
-        if (m_peakBuild > 0.55f && audio.buildUp < 0.2f && m_intensity > 0.35f && m_sinceOver > 8.0f) fire = true;
-        else if (m_peakBuild > 0.0f && m_buildUp < 0.05f) m_peakBuild = 0.0f;
-        if (m_sinceOver > 60.0f && m_intensity > 0.45f && (onDownbeat || !gridLocked)) fire = true;
-    }
     if (fire) Overdrive();
     m_hyper *= std::exp(-dt / 1.3f);
     m_flash *= std::exp(-dt / 0.22f);

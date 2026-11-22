@@ -52,7 +52,10 @@ struct AudioFeatures {
 
     // --- Song structure ---
     float buildUp = 0;          // 0..1: rising tension (risers, rolls, bass pulled out)
-    float drop = 0;             // 1 when a drop lands, decays over ~1 s
+    // The big moment, the same for every visualiser (what Q fakes): a drop (the bass slams back in, or
+    // the level jumps after a build), a big build-up letting go, or, in a big section that hasn't had
+    // one for a while, the start of a phrase. At most one every 6 s.
+    float drop = 0;             // 1 when a big moment lands, decays over ~1 s
     uint32_t dropCount = 0;
 
     float spectrum[kSpectrumBands] = {};      // log-spaced 30 Hz – 16 kHz

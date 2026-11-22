@@ -157,22 +157,12 @@ void DetonationVisualizer::Update(const AudioFeatures& audio, float dt) {
     const bool onDownbeat = audio.barPhase < m_lastBarPhase;
     m_lastBarPhase = audio.barPhase;
 
-    // What sets off a blast: a drop; the release of a big build-up; a big section going on for a few
-    // phrases without one; or, failing all that, a minute of music.
-    bool blast = false;
+    // What sets off a blast: the big moment every visualiser shares (AudioFeatures::drop: drops, big
+    // build-ups letting go, peak phrases).
     if (audio.dropCount != m_lastDrop) {
         m_lastDrop = audio.dropCount;
-        blast = true;
+        if (m_freeze < 0.0f) Detonate();   // even mid-blast: it erupts again
     }
-    if (m_phase == Phase::Calm && !audio.silent) {
-        m_peakCharge = std::max(m_peakCharge, m_charge);
-        if (m_peakCharge > 0.5f && audio.buildUp < 0.2f && m_intensity > 0.35f) blast = true;   // the build-up let go
-        if (m_peakCharge > 0.0f && m_charge < 0.05f && !blast) m_peakCharge = 0.0f;
-        const bool phrase = gridLocked ? (onDownbeat && m_phraseBeats >= 32) : true;
-        if (phrase && m_sinceBlast > 22.0f && m_regrow > 0.5f && m_intensity > 0.5f) blast = true;
-        if (m_sinceBlast > 55.0f && m_intensity > 0.2f && (onDownbeat || !gridLocked)) blast = true;
-    }
-    if (blast && m_freeze < 0.0f) Detonate();   // even mid-blast: it erupts again
 
     // Developer switch: hold one moment of a blast.
     if (m_freeze >= 0.0f) {

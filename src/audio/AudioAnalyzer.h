@@ -87,6 +87,11 @@ private:
     float m_bassAbsentTime = 0;
     float m_lastBassAbsent = 0;     // previous frame's m_bassAbsentTime
     float m_dropCooldown = 0;
+    float m_sinceHit = 0;           // seconds since the last big moment
+    float m_buildPeak = 0;          // the highest build-up since the last big moment
+    float m_lastBarPhase = 0;
+    uint32_t m_lastGridBeat = 0;
+    int m_phraseBeats = 0;          // confident grid beats since the last big moment
     float m_activeTime = 0;         // seconds of continuous (non-silent) audio
     float m_rhythmHold = 0;         // > 0 while a confident beat was seen recently
 
