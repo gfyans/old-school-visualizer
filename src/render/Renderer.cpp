@@ -2,6 +2,7 @@
 #include "g_composite_ps.h"
 #include "g_fullscreen_vs.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace {
@@ -13,8 +14,6 @@ struct CompositeConstants {   // matches shaders/composite_ps.hlsl
     float uvScaleB[2], uvMaxB[2];
     float mix, hasB, style, seed;
     float warmth, hueShift, gradeAmount, gradePad;
-    float filterStyle, glitch, filterTime, filterPad;
-    float pal[4][4];   // bg, mid, hi, accent (rgb + pad)
 };
 
 template <typename T>
@@ -240,8 +239,14 @@ void Renderer::ClearBackBuffer(float r, float g, float b) {
     if (m_backBufferRTV) m_context->ClearRenderTargetView(m_backBufferRTV.Get(), colour);
 }
 
-void Renderer::Composite(const CompositeLayer& a, const CompositeLayer* b, float mix, int style, float seed, const RECT* region) {
-    BindBackBuffer(region);
+void Renderer::Composite(const CompositeLayer& a, const CompositeLayer* b, float mix, int style, float seed, const RECT* region,
+                         const RenderTarget* into) {
+    if (into) {
+        const int w = region ? region->right - region->left : m_width, h = region ? region->bottom - region->top : m_height;
+        BindTarget(into->rtv.Get(), std::min(w, into->width), std::min(h, into->height), 0.0f, 0.0f);
+    } else {
+        BindBackBuffer(region);
+    }
 
     CompositeConstants cc{};
     memcpy(cc.uvScaleA, a.uvScale, sizeof(cc.uvScaleA));
@@ -256,11 +261,7 @@ void Renderer::Composite(const CompositeLayer& a, const CompositeLayer* b, float
     cc.seed = seed;
     cc.warmth = m_gradeWarmth;
     cc.hueShift = m_gradeHue;
-    cc.gradeAmount = m_gradeAmount;
-    cc.filterStyle = static_cast<float>(m_filterStyle);
-    cc.glitch = m_glitch;
-    cc.filterTime = m_filterTime;
-    for (int k = 0; k < 4; ++k) memcpy(cc.pal[k], m_palette[k], 3 * sizeof(float));
+    cc.gradeAmount = into ? 0.0f : m_gradeAmount;
     UploadConstants(m_context.Get(), m_compositeCB.Get(), cc);
 
     ID3D11ShaderResourceView* srvs[2] = { a.srv, b ? b->srv : nullptr };

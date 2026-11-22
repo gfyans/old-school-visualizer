@@ -58,6 +58,10 @@ public:
         TakeMessage();   // quietly
     }
 
+    // Whether the selected filter (X) is drawn over this visualiser. False for ones that already
+    // are a filter-like look of their own.
+    virtual bool AllowsFilter() const { return true; }
+
     // True while a set piece is playing (a blast, a supernova…) that Random mode shouldn't cut off.
     virtual bool Busy() const { return false; }
 

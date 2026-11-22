@@ -68,6 +68,10 @@ compile_shader(signal_ps.hlsl        ps_5_0 g_signal_ps)
 compile_shader(signal_mesh_vs.hlsl   vs_5_0 g_signal_mesh_vs)
 compile_shader(signal_mesh_ps.hlsl   ps_5_0 g_signal_mesh_ps)
 compile_shader(detonation_ps.hlsl    ps_5_0 g_detonation_ps)
+# Filters (X): one pixel shader each, registered in main.cpp (RegisterFilters).
+foreach(filter ascii dither led scan vhs polaroid halftone thermal)
+    compile_shader(filter_${filter}_ps.hlsl ps_5_0 g_filter_${filter}_ps)
+endforeach()
 compile_shader(capture_yuv_ps.hlsl   ps_5_0 g_capture_y_ps PLANE=0)
 compile_shader(capture_yuv_ps.hlsl   ps_5_0 g_capture_uv_ps PLANE=1)
 
@@ -93,6 +97,7 @@ add_executable(Visualizer WIN32
     src/ui/Overlay.cpp
     src/ui/EqBars.cpp
     src/viz/VisualizerHost.cpp
+    src/filter/FilterHost.cpp
     src/viz/spectrum/SpectrumVisualizer.cpp
     src/viz/nebula/NebulaVisualizer.cpp
     src/viz/liquid/LiquidVisualizer.cpp

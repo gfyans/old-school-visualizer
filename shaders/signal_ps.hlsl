@@ -303,6 +303,7 @@ float4 main(VSOut i) : SV_Target {
     int st = (int)style;
     float2 px = i.uv * iResolution;
     float2 size = CyberCellSize(st, iResolution.y) * cellScale;
+    if (st != kStyleScan) size = max(1.0, round(size));   // whole pixels keep glyphs and lamps even
     float2 centre, local;
     CyberCell(px, size, centre, local);
     float2 cell = floor(px / size);
@@ -331,7 +332,8 @@ float4 main(VSOut i) : SV_Target {
     if (Hash33(int3(cell, 11)).x < dissolve * 0.7) src *= 0.15;
 
     float3 col;
-    if (st == kStyleAscii) col = CyberAscii(src, local, cell, flicker, time, pal);
+    // (One ray per cell: the cell's own colour is the dim picture behind its glyph.)
+    if (st == kStyleAscii) col = CyberAscii(src, src, local, cell, flicker, time, pal);
     else if (st == kStyleDither) col = CyberDither(src, int2(cell), pal);
     else if (st == kStyleLed) col = CyberLed(src * 1.3, local) + pal.bg * 0.6;
     else col = CyberScan(samples[2], src, samples[0], 0, local, cell, time, glitch) + pal.bg;

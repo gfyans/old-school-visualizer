@@ -10,6 +10,7 @@
 #include "ui/EqBars.h"
 #include "ui/Overlay.h"
 #include "update/Updater.h"
+#include "filter/FilterHost.h"
 #include "viz/VisualizerHost.h"
 #include "viz/liquid/LiquidVisualizer.h"
 #include "viz/nebula/NebulaVisualizer.h"
@@ -21,6 +22,14 @@
 #include "viz/signal/SignalVisualizer.h"
 #include "viz/detonation/DetonationVisualizer.h"
 #include "viz/spectrum/SpectrumVisualizer.h"
+#include "g_filter_ascii_ps.h"
+#include "g_filter_dither_ps.h"
+#include "g_filter_halftone_ps.h"
+#include "g_filter_led_ps.h"
+#include "g_filter_polaroid_ps.h"
+#include "g_filter_scan_ps.h"
+#include "g_filter_thermal_ps.h"
+#include "g_filter_vhs_ps.h"
 
 #include <algorithm>
 #include <memory>
@@ -46,6 +55,22 @@ void RegisterVisualizers(VisualizerHost& host) {
     host.Add(std::make_unique<SignalVisualizer>());
     host.Add(std::make_unique<DetonationVisualizer>());
     host.Add(std::make_unique<SpectrumVisualizer>());
+}
+
+// To add a filter: write shaders/filter_<name>_ps.hlsl and add it here (or implement IFilter for one
+// that needs more than a shader). Order = the order X goes through them. See docs/adding-a-filter.md.
+void RegisterFilters(FilterHost& filters) {
+    auto shader = [&](const wchar_t* name, const BYTE* bytecode, size_t size) {
+        filters.Add(std::make_unique<ShaderFilter>(name, bytecode, size));
+    };
+    shader(L"ASCII", g_filter_ascii_ps, sizeof(g_filter_ascii_ps));
+    shader(L"Dither", g_filter_dither_ps, sizeof(g_filter_dither_ps));
+    shader(L"LED", g_filter_led_ps, sizeof(g_filter_led_ps));
+    shader(L"Scan lines", g_filter_scan_ps, sizeof(g_filter_scan_ps));
+    shader(L"VHS", g_filter_vhs_ps, sizeof(g_filter_vhs_ps));
+    shader(L"Polaroid", g_filter_polaroid_ps, sizeof(g_filter_polaroid_ps));
+    shader(L"Halftone", g_filter_halftone_ps, sizeof(g_filter_halftone_ps));
+    shader(L"Thermal", g_filter_thermal_ps, sizeof(g_filter_thermal_ps));
 }
 
 class Clock {
@@ -99,6 +124,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
 
     VisualizerHost host;
     RegisterVisualizers(host);
+    FilterHost filters;
+    RegisterFilters(filters);
     Overlay overlay;
     overlay.Init();
 
@@ -108,9 +135,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     auto createDeviceResources = [&] {
         overlay.CreateDeviceResources(renderer.D2DContext());
         eqBars.CreateResources(renderer.Device());   // optional: bars just won't draw if this fails
-        return host.CreateResources(renderer);
+        const bool filtersOk = filters.CreateResources(renderer.Device());
+        return host.CreateResources(renderer) && filtersOk;
     };
     if (!createDeviceResources()) { Fatal(L"Could not create graphics resources."); return 1; }
+    filters.Select(filters.FindByName(settings.filter));
     if (const int saved = host.FindByName(settings.visualizer); saved > 0) host.Select(saved, false);
     else host.Active().Activate();
 
@@ -155,21 +184,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     bool moodColour = settings.moodColour;
     float gradeWarmth = 0.0f, gradeHue = 0.0f, gradeHueTarget = 0.0f, gradeAmount = moodColour ? 1.0f : 0.0f;
     uint32_t seenChord = 0;
-    // Glitch filter (X): ASCII / dither / LED / scan / VHS / Polaroid / halftone / thermal over any visualiser,
-    // palette changing on drops and songs.
-    int glitchFilter = settings.glitchFilter, glitchPalette = 0;
-    float glitchAmount = 0.0f;
-    uint32_t seenDrop = 0;
-    static const float kGlitchPalettes[4][4][3] = {   // bg, mid, hi, accent
-        { { 0.035f, 0.008f, 0.10f }, { 1.00f, 0.16f, 0.43f }, { 0.82f, 0.97f, 1.00f }, { 0.02f, 0.85f, 0.91f } },   // Noir
-        { { 0.015f, 0.04f, 0.02f },  { 0.20f, 0.90f, 0.30f }, { 0.85f, 1.00f, 0.60f }, { 1.00f, 0.90f, 0.10f } },   // Acid
-        { { 0.05f, 0.00f, 0.01f },   { 0.90f, 0.06f, 0.12f }, { 1.00f, 0.88f, 0.72f }, { 1.00f, 0.50f, 0.10f } },   // Blood
-        { { 0.00f, 0.02f, 0.06f },   { 0.12f, 0.45f, 0.95f }, { 0.90f, 0.97f, 1.00f }, { 0.65f, 0.25f, 1.00f } },   // Ice
-    };
-    static const wchar_t* kGlitchNames[kGlitchFilterCount] = {
-        L"Glitch filter off", L"Glitch filter: ASCII", L"Glitch filter: dither", L"Glitch filter: LED",
-        L"Glitch filter: scan lines", L"Glitch filter: VHS", L"Glitch filter: Polaroid", L"Glitch filter: halftone",
-        L"Glitch filter: thermal" };
     // Scene changes (C): 0 off, 1 a new visualiser with each song, 2 Random: a random visualiser and look
     // about every minute, switched on a phrase (or on a drop).
     int sceneChanges = settings.sceneChanges;
@@ -195,7 +209,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         host.Select(pick);
         host.Active().Randomise(rng());
         host.ShuffleExtras();
-        if (glitchFilter != 0 && rng() % 3 == 0) glitchFilter = 1 + static_cast<int>(rng() % (kGlitchFilterCount - 1));
+        if (rng() % 3 == 0) filters.SelectRandom(rng());   // a new filter now and then (if one is on)
         announce();
     };
 
@@ -304,7 +318,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         settings.instantReplay = recorder.InstantReplay();
         settings.videoFolder = videoFolder;
         settings.moodColour = moodColour;
-        settings.glitchFilter = glitchFilter;
+        settings.filter = filters.CurrentName();
         settings.displayMode = displayMode;
         settings.monitor = fullscreenMonitor;
         settings.Save();
@@ -375,8 +389,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             }
             break;
         case 'X':
-            glitchFilter = (glitchFilter + 1) % kGlitchFilterCount;
-            overlay.ShowMessage(kGlitchNames[glitchFilter], 1.5f);
+            filters.Next();
+            overlay.ShowMessage(filters.Message(), 1.5f);
             break;
         case 'K':
             moodColour = !moodColour;
@@ -421,7 +435,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
 
     // --- The right-click menu: every setting, with its key alongside -------------------------
     window.onContextMenu = [&](POINT at) {
-        enum : UINT { kViz = 1000, kScene = 1100, kGlitch = 1200, kDevice = 1300, kDisplay = 1400, kStream = 1500, kPrevTrack = 1600 };
+        enum : UINT { kViz = 1000, kScene = 1100, kFilter = 1200, kDevice = 1300, kDisplay = 1400, kStream = 1500, kPrevTrack = 1600 };
         auto keyName = [](UINT vk) -> std::wstring {
             switch (vk) {
             case VK_SPACE: return L"Space";
@@ -474,11 +488,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         sep(menu);
 
         HMENU effects = CreatePopupMenu();
-        HMENU glitch = CreatePopupMenu();
-        static const wchar_t* kGlitchItems[kGlitchFilterCount] = { L"Off", L"ASCII", L"Dither", L"LED", L"Scan lines",
-                                                                   L"VHS", L"Polaroid", L"Halftone", L"Thermal" };
-        for (int i = 0; i < kGlitchFilterCount; ++i) radio(glitch, kGlitch + i, kGlitchItems[i], i == glitchFilter);
-        sub(effects, glitch, L"Glitch filter\tX");
+        HMENU filterMenu = CreatePopupMenu();
+        radio(filterMenu, kFilter, L"Off", !filters.Active());
+        for (int i = 0; i < filters.Count() && i < 99; ++i) radio(filterMenu, kFilter + 1 + i, filters.At(i).Name(), i == filters.Current());
+        sub(effects, filterMenu, L"Filter\tX");
         item(effects, 'B', L"Equaliser bars", 'B', eqBars.Visible());
         item(effects, 'K', L"Mood colour", 'K', moodColour);
         item(effects, 'A', L"Album-art colours", 'A', albumColours);
@@ -535,7 +548,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         else if (cmd >= kStream && cmd < kStream + 3) setStreamMode(cmd - kStream);
         else if (cmd >= kDisplay && cmd < kDisplay + 3) setDisplayMode(cmd - kDisplay);
         else if (cmd >= kDevice && cmd < kDevice + 100) setAudioDevice(cmd == kDevice ? nullptr : &devices[cmd - kDevice - 1]);
-        else if (cmd >= kGlitch && cmd < kGlitch + kGlitchFilterCount) { glitchFilter = cmd - kGlitch; overlay.ShowMessage(kGlitchNames[glitchFilter], 1.5f); }
+        else if (cmd >= kFilter && cmd < kFilter + 100) { filters.Select(static_cast<int>(cmd - kFilter) - 1); overlay.ShowMessage(filters.Message(), 1.5f); }
         else if (cmd >= kScene && cmd < kScene + 3) setSceneChanges(cmd - kScene);
         else if (cmd >= kViz && cmd < kViz + 100) { if (static_cast<int>(cmd - kViz) != host.Current()) { host.Select(cmd - kViz); announce(); } }
         else window.onKeyDown(cmd);   // everything else is the key it's labelled with
@@ -618,7 +631,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             seenTrack = track.trackSerial;
             seenPalette = track.paletteSerial;
             if (newTrack && trackTitles) overlay.ShowTrack(track.title, track.artist);
-            if (newTrack) glitchPalette = (glitchPalette + 1) % 4;
+            if (newTrack) filters.NewTrack();
             if (newTrack || newPalette) applyPalette(newTrack);
             // Auto-cycle: a new visualiser with each new song (not for the song already
             // playing when the app starts).
@@ -667,15 +680,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         gradeWarmth += (audio.mood - gradeWarmth) * (1.0f - std::exp(-dt / 3.0f));
         gradeAmount += ((moodColour ? 1.0f : 0.0f) - gradeAmount) * (1.0f - std::exp(-dt / 0.5f));
         renderer.SetGrade(gradeWarmth, gradeHue, gradeAmount);
-        if (audio.dropCount != seenDrop) { seenDrop = audio.dropCount; glitchPalette = (glitchPalette + 1) % 4; }
-        glitchAmount = std::max(glitchAmount * std::exp(-dt / 0.12f),
-                                std::min(1.0f, 0.7f * audio.snare + 0.6f * audio.buildUp * audio.buildUp + audio.drop));
-        // (Signal already is glitch art: no filter on top of it.)
-        const bool signalShown = std::wcscmp(host.Active().Name(), L"Signal") == 0;
-        renderer.SetFilter(signalShown ? 0 : glitchFilter, glitchAmount, static_cast<float>(std::fmod(time, 1000.0)), kGlitchPalettes[glitchPalette]);
+        filters.Update(audio, dt);
         renderer.UploadAudio(audio);
         if (streamMode == 2) renderer.ClearBackBuffer(0.0f, 1.0f, 0.0f);   // bars on green: no visualiser
-        else host.Render(renderer, static_cast<float>(time), dt);   // leaves the back buffer bound
+        else host.Render(renderer, static_cast<float>(time), dt, &filters);   // leaves the back buffer bound
 
         float accentLo[3], accentHi[3];
         host.Active().AccentColours(accentLo, accentHi);
@@ -735,6 +743,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             break;
         case PresentResult::DeviceLost:
             host.ReleaseResources();
+            filters.ReleaseResources();
             recorder.ReleaseDeviceResources();
             overlay.ReleaseDeviceResources();
             eqBars.ReleaseResources();

@@ -234,8 +234,16 @@ CompositeLayer VisualizerHost::LayerFor(const Slot& slot) const {
     return layer;
 }
 
-void VisualizerHost::Render(Renderer& renderer, float time, float dt) {
+void VisualizerHost::Render(Renderer& renderer, float time, float dt, FilterHost* filters) {
     if (m_slots.empty() || !m_device) return;
+    // Composite one area of the screen, through the selected filter if the visualiser allows one.
+    auto present = [&](const IVisualizer& viz, const CompositeLayer& a, const CompositeLayer* b, float mix, int style,
+                       float seed, const RECT* region) {
+        RenderTarget* scene = filters && viz.AllowsFilter() ? filters->SceneTarget(renderer) : nullptr;
+        renderer.Composite(a, b, mix, style, seed, region, scene);
+        if (scene) filters->Apply(renderer, region);
+    };
+
     const RECT* primary = m_regions.empty() ? nullptr : &m_regions[0];
     if (primary) renderer.ClearBackBuffer();   // gaps between monitors of different sizes
     Slot& cur = m_slots[m_current];
@@ -248,15 +256,15 @@ void VisualizerHost::Render(Renderer& renderer, float time, float dt) {
         SetBase(prev, primary);
         RenderSlot(prev, renderer, time, dt);
         const CompositeLayer previous = LayerFor(prev);
-        renderer.Composite(previous, &current, m_fade, m_style, m_seed, primary);
+        present(*cur.viz, previous, &current, m_fade, m_style, m_seed, primary);
     } else {
-        renderer.Composite(current, nullptr, 0.0f, 0, 0.0f, primary);
+        present(*cur.viz, current, nullptr, 0.0f, 0, 0.0f, primary);
     }
 
     for (size_t i = 0; i < m_extra.size() && i + 1 < m_regions.size(); ++i) {
         Slot& s = m_slots[m_extra[i]];
         SetBase(s, &m_regions[i + 1]);
         RenderSlot(s, renderer, time, dt);
-        renderer.Composite(LayerFor(s), nullptr, 0.0f, 0, 0.0f, &m_regions[i + 1]);
+        present(*s.viz, LayerFor(s), nullptr, 0.0f, 0, 0.0f, &m_regions[i + 1]);
     }
 }

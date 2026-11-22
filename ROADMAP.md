@@ -38,7 +38,7 @@ Where this is going next, in order. ✅ = done.
   released build-ups and big phrases; a dome that punches with the kicks);
   ✅ Spectrum (Studio and Radial looks; physical peak caps and drop fireworks).
 - **Feel:** ✅ auto-cycle; ✅ Random scene changes (a new scene and look every minute or so, on the phrase);
-  ✅ transitions with character; ✅ glitch filter over every scene (`X`).
+  ✅ transitions with character; ✅ filters over every scene (`X`).
 - **Ease of use:** ✅ right-click menu with every setting; ✅ short help with the current visualiser's keys.
 - **Beyond the screen:** ✅ multi-monitor; ✅ MP4 recording and instant replay; ✅ stream mode for OBS;
   ✅ automatic updates.

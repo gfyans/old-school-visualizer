@@ -5,6 +5,7 @@
 #include <cstring>
 #include <wrl/client.h>
 #include "audio/AudioFeatures.h"
+#include "render/RenderTarget.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -62,18 +63,15 @@ public:
     // Draws layer a (or the a->b transition at `mix`, in `style`) scaled to the back buffer, or
     // to `region` of it (multi-monitor: one region per monitor).
     // Styles: 0 crossfade, 1 glitch cut, 2 zoom-through, 3 iris, 4 pixel dissolve.
+    // into: draw the region's picture into the top-left of this texture instead, for a filter to
+    // restyle (no mood grade: the filter sets the colours).
     void Composite(const CompositeLayer& a, const CompositeLayer* b, float mix, int style = 0, float seed = 0.0f,
-                   const RECT* region = nullptr);
+                   const RECT* region = nullptr, const RenderTarget* into = nullptr);
     // Binds the back buffer (or a region of it: the viewport and iResolution match the region).
     void BindBackBuffer(const RECT* region = nullptr);
     // Mood colour grade applied by Composite: warmth -1 (cool) .. +1 (warm), hue in radians,
     // amount 0 (off) .. 1.
     void SetGrade(float warmth, float hue, float amount) { m_gradeWarmth = warmth; m_gradeHue = hue; m_gradeAmount = amount; }
-    // Glitch filter applied by Composite (style 0 = off; see shaders/cyber.hlsli). palette: bg, mid, hi, accent.
-    void SetFilter(int style, float glitch, float time, const float palette[4][3]) {
-        m_filterStyle = style; m_glitch = glitch; m_filterTime = time;
-        memcpy(m_palette, palette, sizeof(m_palette));
-    }
     void ClearBackBuffer(float r = 0.0f, float g = 0.0f, float b = 0.0f);
 
     ID2D1DeviceContext* BeginOverlay();   // draws onto the back buffer; nullptr if unavailable
@@ -88,6 +86,7 @@ public:
         return t;
     }
     ID3D11DeviceContext* Context() const { return m_context.Get(); }
+    ID3D11SamplerState* LinearClamp() const { return m_linearClamp.Get(); }
     ID2D1DeviceContext* D2DContext() const { return m_d2dContext.Get(); }
     int Width() const { return m_width; }
     int Height() const { return m_height; }
@@ -104,9 +103,6 @@ private:
     ID3D11RenderTargetView* m_boundRTV = nullptr;   // not owned
     int m_boundW = 0, m_boundH = 0;
     float m_gradeWarmth = 0.0f, m_gradeHue = 0.0f, m_gradeAmount = 0.0f;
-    int m_filterStyle = 0;
-    float m_glitch = 0.0f, m_filterTime = 0.0f;
-    float m_palette[4][3] = {};
 
     ComPtr<ID3D11Device> m_device;
     ComPtr<ID3D11DeviceContext> m_context;

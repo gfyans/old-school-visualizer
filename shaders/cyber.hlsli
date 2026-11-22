@@ -2,31 +2,26 @@
 #define CYBER_HLSLI
 #include "common.hlsli"
 
-// Cyberpunk glitch styles, shared by the global glitch filter (composite_ps) and the Signal
-// visualiser. Each style quantises the picture into cells; the caller samples (or renders) the
-// source at the cell's centre, then shades the cell here.
-//   1 ASCII     glyphs from a brightness ramp, on a dark ground
-//   2 Dither    ordered (Bayer) dithering into a hard four-colour palette
-//   3 LED       chunky rounded cells, saturated, in a few brightness steps
+// Cyberpunk glitch styles, shared by the Signal visualiser and the ASCII, dither, LED and scan-line
+// filters (shaders/filter_*_ps.hlsl), so the two always look alike. Each style quantises the picture
+// into cells; the caller samples (or renders) the source at the cell's centre, then shades the cell here.
+//   1 ASCII     glyphs from a brightness ramp, partly in the source's colour, over a dim copy of it
+//   2 Dither    ordered (Bayer) dithering in five shades of a four-colour palette
+//   3 LED       rounded lamps, saturated, in a few brightness steps
 //   4 Scan      thin horizontal scan lines, torn sideways with RGB fringes
-// The global filter only (composite_ps), worked per pixel rather than in cells:
-//   5 VHS       soft, washed-out tape with colour bleed, a rolling tracking band and head noise
-//   6 Polaroid  faded instant-film colour: lifted teal shadows, creamy highlights, vignette, grain
-//   7 Halftone  cyan / magenta / yellow print dots on rotated screens, sized by the colour
-//   8 Thermal   heat-camera colours from brightness
 
-static const int kStyleOff = 0, kStyleAscii = 1, kStyleDither = 2, kStyleLed = 3, kStyleScan = 4,
-                 kStyleVhs = 5, kStylePolaroid = 6, kStyleHalftone = 7, kStyleThermal = 8;
+static const int kStyleOff = 0, kStyleAscii = 1, kStyleDither = 2, kStyleLed = 3, kStyleScan = 4;
 
-// Cell size in pixels for each style, at 1080p (scaled with the picture's height). The Signal
-// visualiser multiplies these by its own per-style scale.
+// Cell size in pixels for each style, at 1080p (scaled with the picture's height). Snapped to whole
+// pixels so glyphs and lamps stay even (scan lines aren't: their spacing was tuned unsnapped).
 float2 CyberCellSize(int style, float height) {
     float s = height / 1080.0;
-    if (style == kStyleAscii) return float2(6.0, 9.0) * s;
-    if (style == kStyleDither) return float2(2.0, 2.0) * s;
-    if (style == kStyleLed) return float2(6.0, 6.0) * s;
-    if (style == kStyleScan) return float2(1.0, 4.0) * s;
-    return float2(1.0, 1.0);
+    float2 size = float2(1.0, 1.0);
+    if (style == kStyleAscii) size = float2(6.0, 9.0) * s;
+    else if (style == kStyleDither) size = float2(2.0, 2.0) * s;
+    else if (style == kStyleLed) size = float2(6.0, 6.0) * s;
+    else if (style == kStyleScan) return float2(1.0, 4.0) * s;
+    return max(1.0, round(size));
 }
 
 // Snap a pixel to its cell: the centre (pixels) and where in the cell it is (0..1).
@@ -79,20 +74,29 @@ float3 CyberAsciiInk(float3 src, float l, CyberPalette pal) {
     return ink * (0.6 + 0.6 * l);
 }
 
-float3 CyberAscii(float3 src, float2 local, float2 cell, float flicker, float time, CyberPalette pal) {
-    float l = saturate(Luma(src) * 1.15);
-    return lerp(pal.bg, CyberAsciiInk(src, l, pal), CyberAsciiMask(l, local, cell, flicker, time));
+float3 Hue(float3 c) { return c / max(max(c.r, max(c.g, c.b)), 1e-3); }
+
+// ASCII: glyphs from the source's (lifted) brightness, inked partly in the palette and partly in the
+// source's own colour, over a dim copy of the picture (backdrop), so the subject stays easy to read.
+float3 CyberAscii(float3 src, float3 backdrop, float2 local, float2 cell, float flicker, float time, CyberPalette pal) {
+    float l = saturate(pow(max(Luma(src), 0.0), 0.8) * 1.15);
+    float m = CyberAsciiMask(l, local, cell, flicker, time);
+    float3 ink = lerp(CyberAsciiInk(src, l, pal), Hue(src) * (0.35 + 0.9 * l), 0.55);
+    return lerp(pal.bg + backdrop * 0.16, ink, m);
 }
 
+// Dither: ordered (Bayer) dithering in five shades from the palette's background to its highlight.
+// Brightness is lifted first, above a black floor, so dark areas stay background but dim detail
+// still shows; the middle shades take the source's own hue.
 float3 CyberDither(float3 src, int2 cellIndex, CyberPalette pal) {
-    float l = saturate(Luma(src) * 1.2);
-    float t = Bayer8(cellIndex);
-    int level = (int)floor(saturate(l) * 3.0 + t);   // 0..3
+    float l = pow(saturate((Luma(src) * 1.3 - 0.06) / 0.94), 0.8);
     float cool = saturate((src.b - max(src.r, src.g)) * 4.0);
-    float3 midColour = lerp(pal.mid, pal.accent, step(0.5, cool));
+    float3 mid = lerp(lerp(pal.mid, pal.accent, step(0.5, cool)), Hue(src) * 0.95, 0.5);
+    int level = min((int)floor(l * 4.0 + Bayer8(cellIndex)), 4);
     if (level <= 0) return pal.bg;
-    if (level == 1) return lerp(pal.bg, midColour, (Bayer8(cellIndex + 3) < 0.5) ? 1.0 : 0.0);   // sparse dots
-    if (level == 2) return midColour;
+    if (level == 1) return lerp(pal.bg, mid, 0.3);
+    if (level == 2) return mid;
+    if (level == 3) return lerp(mid, pal.hi, 0.5);
     return pal.hi;
 }
 
@@ -109,7 +113,7 @@ float3 CyberLed(float3 src, float2 local) {
 
 // Scan slices: how far this row is torn sideways (in pixels), from glitch strength 0..1. On hits,
 // whole bands rip across; `idle` is the share of rows slightly off even when the music is quiet
-// (Signal keeps a few; the global filter passes 0 so it only tears on hits).
+// (Signal keeps a few; the filters pass 0 so they only tear on hits).
 float CyberTear(float row, float time, float glitch, float idle = 0.04) {
     float band = floor(row / 6.0);
     float3 h = Hash33(int3((int)band, (int)(time * 15.0), 77));

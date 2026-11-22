@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "filter/FilterHost.h"
 #include "render/GpuTimer.h"
 #include "render/RenderTarget.h"
 #include "render/Renderer.h"
@@ -36,7 +37,8 @@ public:
     void SetTrackPalette(const TrackPalette* palette, bool newTrack) {
         for (Slot& s : m_slots) s.viz->SetTrackPalette(palette, newTrack);
     }
-    void Render(Renderer& renderer, float time, float dt);
+    // filters: the selected filter (if any) is drawn over each visualiser that allows it.
+    void Render(Renderer& renderer, float time, float dt, FilterHost* filters = nullptr);
 
     // Multi-monitor: one region of the back buffer per monitor (client pixels). Region 0 shows the
     // active visualiser (with transitions); each other region gets a different one. Empty = the

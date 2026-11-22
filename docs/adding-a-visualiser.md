@@ -25,6 +25,9 @@ There are optional ones too:
   of a big moment.
 * `TakeMessage()` / `Status()`: on-screen messages and a line for the `F1` stats.
 * `SetTrackPalette()`: album-art colours and song changes. `AccentColours()` tints the EQ bars.
+* `AllowsFilter()`: return false if the filters (`X`) shouldn't be drawn over your visualiser.
+
+To add a filter instead, see [adding-a-filter.md](adding-a-filter.md).
 
 If you need several passes, render into your own textures and then restore `renderer.BoundTarget()` before the
 final draw. `LiquidVisualizer` does this.

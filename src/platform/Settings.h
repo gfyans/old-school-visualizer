@@ -2,10 +2,6 @@
 #include <windows.h>
 #include <string>
 
-// Glitch filter choices, "off" included: off, ASCII, dither, LED, scan lines, VHS, Polaroid, halftone,
-// thermal. Matches the style numbers in shaders/cyber.hlsli.
-constexpr int kGlitchFilterCount = 9;
-
 // User preferences, remembered between runs in %APPDATA%\Visualizer\settings.ini.
 // The exe itself stays portable: delete the folder to reset.
 struct Settings {
@@ -22,7 +18,7 @@ struct Settings {
     bool instantReplay = false; // keep the last 30 s ready to save as a video
     std::wstring videoFolder;   // where recordings go (empty = Videos\Visualizer)
     bool moodColour = true;     // tint the picture by the music's mood and chords
-    int glitchFilter = 0;       // 0 off, then kGlitchFilterCount - 1 styles (see shaders/cyber.hlsli)
+    std::wstring filter;        // name of the filter over the visualisers (empty = off)
     bool autoUpdate = true;     // check GitHub for new versions (at most daily) and install them on exit
     long long lastUpdateCheck = 0;   // unix seconds
     int displayMode = 0;        // fullscreen with several monitors: 0 one monitor, 1 each its own visualiser, 2 span

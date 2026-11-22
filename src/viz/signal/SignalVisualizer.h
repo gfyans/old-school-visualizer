@@ -34,6 +34,7 @@ public:
     }
     std::wstring TakeMessage() override;
     std::wstring Status() const override;
+    bool AllowsFilter() const override { return false; }   // already glitch art: no filter on top
     void AccentColours(float lo[3], float hi[3]) const override;
     void SetTrackPalette(const TrackPalette* palette, bool newTrack) override;
 

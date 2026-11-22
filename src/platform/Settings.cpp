@@ -60,8 +60,12 @@ void Settings::Load() {
     sceneChanges = std::clamp(ReadInt(file, L"AutoCycle", 0), 0, 2);
     instantReplay = ReadInt(file, L"InstantReplay", 0) != 0;
     moodColour = ReadInt(file, L"MoodColour", 1) != 0;
-    glitchFilter = ReadInt(file, L"GlitchFilter", 0);
-    if (glitchFilter < 0 || glitchFilter >= kGlitchFilterCount) glitchFilter = 0;
+    filter = ReadString(file, L"Filter");
+    if (filter.empty()) {   // saved by 1.10 and earlier: a number in the menu's order
+        static const wchar_t* kOld[] = { L"", L"ASCII", L"Dither", L"LED", L"Scan lines", L"VHS", L"Polaroid", L"Halftone", L"Thermal" };
+        const int old = ReadInt(file, L"GlitchFilter", 0);
+        if (old > 0 && old < static_cast<int>(ARRAYSIZE(kOld))) filter = kOld[old];
+    }
     autoUpdate = ReadInt(file, L"AutoUpdate", 1) != 0;
     lastUpdateCheck = _wtoi64(ReadString(file, L"LastUpdateCheck").c_str());
 }
@@ -88,7 +92,8 @@ void Settings::Save() const {
     WriteInt(file, L"AutoCycle", sceneChanges);
     WriteInt(file, L"InstantReplay", instantReplay ? 1 : 0);
     WriteInt(file, L"MoodColour", moodColour ? 1 : 0);
-    WriteInt(file, L"GlitchFilter", glitchFilter);
+    WriteString(file, L"Filter", filter.empty() ? std::wstring(L"Off") : filter);
+    WritePrivateProfileStringW(kSection, L"GlitchFilter", nullptr, file.c_str());   // replaced by Filter
     WriteInt(file, L"AutoUpdate", autoUpdate ? 1 : 0);
     WriteString(file, L"LastUpdateCheck", std::to_wstring(lastUpdateCheck));
 }
