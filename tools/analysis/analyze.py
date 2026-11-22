@@ -24,7 +24,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-REPLAY = os.path.join(ROOT, "build", "Release", "vis_replay.exe")
+# VIS_REPLAY=path\to\vis_replay.exe scores another build (e.g. the previous commit, for a before/after).
+REPLAY = os.environ.get("VIS_REPLAY") or os.path.join(ROOT, "build", "Release", "vis_replay.exe")
 FPS = 100.0  # reference onset envelope rate
 
 
