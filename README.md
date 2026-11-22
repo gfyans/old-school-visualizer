@@ -7,6 +7,12 @@ It's one small `.exe`. There's no installer, and it keeps itself up to date.
 
 **[Download the latest release](https://github.com/gfyans/old-school-visualizer/releases/latest)**
 
+| | |
+|---|---|
+| ![Neon Grid](docs/screenshots/neon-grid.jpg) | ![Aurora](docs/screenshots/aurora.jpg) |
+| ![Detonation](docs/screenshots/detonation.jpg) | ![Signal](docs/screenshots/signal.jpg) |
+| ![Galaxy](docs/screenshots/galaxy.jpg) | ![Liquid](docs/screenshots/liquid.jpg) |
+
 ## Visualisers
 
 * **Nebula**: a flight through a glowing gas cloud.
@@ -38,6 +44,16 @@ Right-click anywhere for the menu. Every setting is in there. Press `H` to see t
 
 **Nothing reacting?** Press `F1`. If it says *(silent)*, your music is playing on a different device. Press `D`
 until it picks the right one.
+
+## Credits
+
+Signal uses three 3D models from Printables:
+
+* [Cyber Skull](https://www.printables.com/model/1260642-cyber-skull) by [Stigern](https://www.printables.com/@Stigern), [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
+* [Gas Mask Head with Helmet](https://www.printables.com/model/1480313-gas-mask-head-with-helmet) by [Stigern](https://www.printables.com/@Stigern), [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/)
+* [Human Brain](https://www.printables.com/model/595502-human-brain) by [Matteo Pascale](https://www.printables.com/@MatteoPascale_650678), [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+
+The models aren't in this repository. The app embeds them, and it's free.
 
 ## Building
 
