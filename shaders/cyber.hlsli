@@ -9,15 +9,22 @@
 //   2 Dither    ordered (Bayer) dithering into a hard four-colour palette
 //   3 LED       chunky rounded cells, saturated, in a few brightness steps
 //   4 Scan      thin horizontal scan lines, torn sideways with RGB fringes
+// The global filter only (composite_ps), worked per pixel rather than in cells:
+//   5 VHS       soft, washed-out tape with colour bleed, a rolling tracking band and head noise
+//   6 Polaroid  faded instant-film colour: lifted teal shadows, creamy highlights, vignette, grain
+//   7 Halftone  cyan / magenta / yellow print dots on rotated screens, sized by the colour
+//   8 Thermal   heat-camera colours from brightness
 
-static const int kStyleOff = 0, kStyleAscii = 1, kStyleDither = 2, kStyleLed = 3, kStyleScan = 4;
+static const int kStyleOff = 0, kStyleAscii = 1, kStyleDither = 2, kStyleLed = 3, kStyleScan = 4,
+                 kStyleVhs = 5, kStylePolaroid = 6, kStyleHalftone = 7, kStyleThermal = 8;
 
-// Cell size in pixels for each style, at 1080p (scaled with the picture's height).
+// Cell size in pixels for each style, at 1080p (scaled with the picture's height). The Signal
+// visualiser multiplies these by its own per-style scale.
 float2 CyberCellSize(int style, float height) {
     float s = height / 1080.0;
-    if (style == kStyleAscii) return float2(9.0, 13.0) * s;
-    if (style == kStyleDither) return float2(3.0, 3.0) * s;
-    if (style == kStyleLed) return float2(12.0, 12.0) * s;
+    if (style == kStyleAscii) return float2(6.0, 9.0) * s;
+    if (style == kStyleDither) return float2(2.0, 2.0) * s;
+    if (style == kStyleLed) return float2(6.0, 6.0) * s;
     if (style == kStyleScan) return float2(1.0, 4.0) * s;
     return float2(1.0, 1.0);
 }
@@ -55,17 +62,26 @@ struct CyberPalette { float3 bg, mid, hi, accent; };
 
 // --- Shading a cell, given the source colour at its centre -----------------------------------------
 
-float3 CyberAscii(float3 src, float2 local, float2 cell, float flicker, float time, CyberPalette pal) {
-    float l = saturate(Luma(src) * 1.15);
+// The glyph for a cell at brightness l (0..1), and whether this pixel is inked.
+float CyberAsciiMask(float l, float2 local, float2 cell, float flicker, float time) {
     int glyph = (int)round(l * 9.0);
     // Hi-hats make cells flicker to 0s and 1s.
     float3 h = Hash33(int3(cell, (int)(time * 12.0)));
     if (h.x < flicker * 0.35 && l > 0.08) glyph = 10 + (h.y > 0.5);
-    float m = GlyphMask(glyph, local);
-    // Bright glyphs go ice-white, mid ones take the main colour; cool areas of the source pick the accent.
+    return GlyphMask(glyph, local);
+}
+
+// Palette ink for a glyph: bright glyphs go ice-white, mid ones take the main colour; cool areas of
+// the source pick the accent.
+float3 CyberAsciiInk(float3 src, float l, CyberPalette pal) {
     float cool = saturate((src.b - src.r) * 3.0);
     float3 ink = lerp(lerp(pal.mid, pal.accent, cool), pal.hi, smoothstep(0.55, 0.95, l));
-    return lerp(pal.bg, ink * (0.6 + 0.6 * l), m);
+    return ink * (0.6 + 0.6 * l);
+}
+
+float3 CyberAscii(float3 src, float2 local, float2 cell, float flicker, float time, CyberPalette pal) {
+    float l = saturate(Luma(src) * 1.15);
+    return lerp(pal.bg, CyberAsciiInk(src, l, pal), CyberAsciiMask(l, local, cell, flicker, time));
 }
 
 float3 CyberDither(float3 src, int2 cellIndex, CyberPalette pal) {
@@ -91,12 +107,13 @@ float3 CyberLed(float3 src, float2 local) {
     return hue * lamp * max(level, 0.06) * 1.2;
 }
 
-// Scan slices: how far this row is torn sideways (in pixels), from glitch strength 0..1. A few
-// rows are always slightly off; on hits, whole bands rip across.
-float CyberTear(float row, float time, float glitch) {
+// Scan slices: how far this row is torn sideways (in pixels), from glitch strength 0..1. On hits,
+// whole bands rip across; `idle` is the share of rows slightly off even when the music is quiet
+// (Signal keeps a few; the global filter passes 0 so it only tears on hits).
+float CyberTear(float row, float time, float glitch, float idle = 0.04) {
     float band = floor(row / 6.0);
     float3 h = Hash33(int3((int)band, (int)(time * 15.0), 77));
-    float torn = step(1.0 - (0.04 + glitch * 0.35), h.x);
+    float torn = step(1.0 - (idle + glitch * 0.35), h.x);
     return (h.y - 0.5) * (12.0 + 140.0 * glitch) * torn;
 }
 

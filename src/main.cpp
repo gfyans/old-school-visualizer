@@ -155,7 +155,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     bool moodColour = settings.moodColour;
     float gradeWarmth = 0.0f, gradeHue = 0.0f, gradeHueTarget = 0.0f, gradeAmount = moodColour ? 1.0f : 0.0f;
     uint32_t seenChord = 0;
-    // Glitch filter (X): ASCII / dither / LED / scan over any visualiser, palette changing on drops and songs.
+    // Glitch filter (X): ASCII / dither / LED / scan / VHS / Polaroid / halftone / thermal over any visualiser,
+    // palette changing on drops and songs.
     int glitchFilter = settings.glitchFilter, glitchPalette = 0;
     float glitchAmount = 0.0f;
     uint32_t seenDrop = 0;
@@ -165,8 +166,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         { { 0.05f, 0.00f, 0.01f },   { 0.90f, 0.06f, 0.12f }, { 1.00f, 0.88f, 0.72f }, { 1.00f, 0.50f, 0.10f } },   // Blood
         { { 0.00f, 0.02f, 0.06f },   { 0.12f, 0.45f, 0.95f }, { 0.90f, 0.97f, 1.00f }, { 0.65f, 0.25f, 1.00f } },   // Ice
     };
-    static const wchar_t* kGlitchNames[] = { L"Glitch filter off", L"Glitch filter: ASCII", L"Glitch filter: dither",
-                                             L"Glitch filter: LED", L"Glitch filter: scan lines" };
+    static const wchar_t* kGlitchNames[kGlitchFilterCount] = {
+        L"Glitch filter off", L"Glitch filter: ASCII", L"Glitch filter: dither", L"Glitch filter: LED",
+        L"Glitch filter: scan lines", L"Glitch filter: VHS", L"Glitch filter: Polaroid", L"Glitch filter: halftone",
+        L"Glitch filter: thermal" };
     // Scene changes (C): 0 off, 1 a new visualiser with each song, 2 Random: a random visualiser and look
     // about every minute, switched on a phrase (or on a drop).
     int sceneChanges = settings.sceneChanges;
@@ -192,7 +195,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         host.Select(pick);
         host.Active().Randomise(rng());
         host.ShuffleExtras();
-        if (glitchFilter != 0 && rng() % 3 == 0) glitchFilter = 1 + static_cast<int>(rng() % 4);
+        if (glitchFilter != 0 && rng() % 3 == 0) glitchFilter = 1 + static_cast<int>(rng() % (kGlitchFilterCount - 1));
         announce();
     };
 
@@ -372,7 +375,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             }
             break;
         case 'X':
-            glitchFilter = (glitchFilter + 1) % 5;
+            glitchFilter = (glitchFilter + 1) % kGlitchFilterCount;
             overlay.ShowMessage(kGlitchNames[glitchFilter], 1.5f);
             break;
         case 'K':
@@ -472,8 +475,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
 
         HMENU effects = CreatePopupMenu();
         HMENU glitch = CreatePopupMenu();
-        static const wchar_t* kGlitchItems[] = { L"Off", L"ASCII", L"Dither", L"LED", L"Scan lines" };
-        for (int i = 0; i < 5; ++i) radio(glitch, kGlitch + i, kGlitchItems[i], i == glitchFilter);
+        static const wchar_t* kGlitchItems[kGlitchFilterCount] = { L"Off", L"ASCII", L"Dither", L"LED", L"Scan lines",
+                                                                   L"VHS", L"Polaroid", L"Halftone", L"Thermal" };
+        for (int i = 0; i < kGlitchFilterCount; ++i) radio(glitch, kGlitch + i, kGlitchItems[i], i == glitchFilter);
         sub(effects, glitch, L"Glitch filter\tX");
         item(effects, 'B', L"Equaliser bars", 'B', eqBars.Visible());
         item(effects, 'K', L"Mood colour", 'K', moodColour);
@@ -531,7 +535,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         else if (cmd >= kStream && cmd < kStream + 3) setStreamMode(cmd - kStream);
         else if (cmd >= kDisplay && cmd < kDisplay + 3) setDisplayMode(cmd - kDisplay);
         else if (cmd >= kDevice && cmd < kDevice + 100) setAudioDevice(cmd == kDevice ? nullptr : &devices[cmd - kDevice - 1]);
-        else if (cmd >= kGlitch && cmd < kGlitch + 5) { glitchFilter = cmd - kGlitch; overlay.ShowMessage(kGlitchNames[glitchFilter], 1.5f); }
+        else if (cmd >= kGlitch && cmd < kGlitch + kGlitchFilterCount) { glitchFilter = cmd - kGlitch; overlay.ShowMessage(kGlitchNames[glitchFilter], 1.5f); }
         else if (cmd >= kScene && cmd < kScene + 3) setSceneChanges(cmd - kScene);
         else if (cmd >= kViz && cmd < kViz + 100) { if (static_cast<int>(cmd - kViz) != host.Current()) { host.Select(cmd - kViz); announce(); } }
         else window.onKeyDown(cmd);   // everything else is the key it's labelled with

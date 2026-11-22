@@ -52,8 +52,9 @@ const Palette kPalettes[] = {
     { L"Ice",   { { 0.00f, 0.02f, 0.06f },   { 0.12f, 0.45f, 0.95f }, { 0.90f, 0.97f, 1.00f }, { 0.65f, 0.25f, 1.00f } } },
 };
 constexpr int kPaletteCount = 4;
-// Cell size per style, relative to the shared defaults: chunkier dither, slightly larger glyphs.
-constexpr float kCellScale[5] = { 1.0f, 1.25f, 2.0f, 1.0f, 1.0f };
+// Cell size per style, relative to the shared defaults (shaders/cyber.hlsli): Signal draws bigger glyphs,
+// dither and LED cells than the global filter does.
+constexpr float kCellScale[5] = { 1.0f, 1.875f, 3.0f, 2.0f, 1.0f };
 
 float Smooth(float current, float target, float dt, float attack, float release) {
     const float tau = target > current ? attack : release;

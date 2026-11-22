@@ -61,7 +61,7 @@ void Settings::Load() {
     instantReplay = ReadInt(file, L"InstantReplay", 0) != 0;
     moodColour = ReadInt(file, L"MoodColour", 1) != 0;
     glitchFilter = ReadInt(file, L"GlitchFilter", 0);
-    if (glitchFilter < 0 || glitchFilter > 4) glitchFilter = 0;
+    if (glitchFilter < 0 || glitchFilter >= kGlitchFilterCount) glitchFilter = 0;
     autoUpdate = ReadInt(file, L"AutoUpdate", 1) != 0;
     lastUpdateCheck = _wtoi64(ReadString(file, L"LastUpdateCheck").c_str());
 }
