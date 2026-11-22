@@ -4,12 +4,16 @@ Where this is going next, in order. ✅ = done.
 
 ## Up next
 
-1. **Synced lyrics.** Time-coded lyrics for the playing track from a free lyrics database, set as kinetic typography
+1. **Harder rhythms.** A look-ahead dynamic-programming phase stage for thrash metal and syncopated techno: score
+   whole chains of beats against the tempo, so dense double-kick and off-beat accents can't drag the grid off.
+2. **Transparent window for OBS.** True per-pixel alpha through DirectComposition instead of chroma key: soft glow
+   over the game with no green fringe, and any visualiser can be overlaid, not just the equaliser bars.
+3. **Synced lyrics.** Time-coded lyrics for the playing track from a free lyrics database, set as kinetic typography
    in the scene: words punch in on the beat, explode on drops, and glitch in Signal.
-2. **Director mode.** Choreograph the whole song from its structure: a calm scene for the intro, a tunnel for the
+4. **Director mode.** Choreograph the whole song from its structure: a calm scene for the intro, a tunnel for the
    build, Detonation on the drop, the aurora for the outro. A music video, made live.
-3. **Album-art scenes.** The cover shatters into 3D voxels that pulse, orbit and reassemble on the downbeat.
-4. **Phone remote.** Scan a QR code and your phone becomes a controller on your home network: switch scenes, lock
+5. **Album-art scenes.** The cover shatters into 3D voxels that pulse, orbit and reassemble on the downbeat.
+6. **Phone remote.** Scan a QR code and your phone becomes a controller on your home network: switch scenes, lock
    looks, trigger the quasar, supernova or detonation.
 
 ## Later
@@ -18,8 +22,6 @@ Where this is going next, in order. ✅ = done.
 - **Presets and favourites.** Save looks you love.
 - **Screensaver build.** The same exe as a `.scr`.
 - **More worlds for Fractal flights.** A Mandelbulb set piece and a working Kleinian cave world.
-- **Harder rhythms.** A look-ahead dynamic-programming phase stage for thrash metal and syncopated techno.
-- **Transparent window for OBS** (DirectComposition) instead of chroma key.
 
 ## Parked
 - **RGB sync.** Drive SteelSeries / Razer / Hue lighting from the same analysis and palette.
