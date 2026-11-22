@@ -8,8 +8,10 @@
 
 // Tempo and beat-phase tracker. Fed the continuous sample stream, it:
 //   1. computes an onset-strength envelope at 100 Hz (log spectral flux),
-//   2. estimates the beat period by autocorrelating ~6 s of that envelope,
-//   3. finds where the beats fall with a comb filter over recent onsets,
+//   2. scores every chain of beats with dynamic programming over a joint (tempo, position in
+//      the beat) state space, so the best chain over the whole history decides the tempo and
+//      where the beats fall, and changing tempo (above all to another metrical level) costs,
+//   3. refines that tempo on the autocorrelation of ~5 s of the envelope,
 //   4. runs a phase-locked oscillator so beats are *predicted*, not detected late.
 // Also guesses the downbeat (which beat of 4 is accented) for bar phase.
 class BeatTracker {
@@ -41,6 +43,9 @@ private:
     void Configure(float sampleRate);
     void ProcessHop();
     void EstimateTempo();
+    void ChainsStep(float onset);   // advance the beat-chain DP by one envelope tick
+    struct Chain { int period = 0; int position = 0; };
+    Chain BestChain();              // the chain to follow now (sticky), and renormalise
     float EnvelopeAt(float ticksAgo) const;   // linear interpolation into the history
 
     float m_rate = 0.0f;
@@ -64,12 +69,25 @@ private:
 
     // Tempo
     float m_period = 0.0f;             // in envelope ticks (100 Hz)
-    float m_candidatePeriod = 0.0f;
-    int m_candidateVotes = 0;
     float m_rawConfidence = 0.0f;
     float m_phaseErrorAvg = 0.25f;     // start sceptical
     float m_broadestJump = 0.0f, m_percussive = 0.0f;
     int m_sinceEstimate = 0;
+
+    // Beat chains: one log score per (period, position) state, a ring per period so moving
+    // every state one position on is just a head step.
+    static constexpr int kMinChainPeriod = 33, kMaxChainPeriod = 92;   // ticks: 182-65 BPM
+    static constexpr int kChainTempi = kMaxChainPeriod - kMinChainPeriod + 1;
+    std::vector<float> m_chain;                      // all states, period by period
+    std::array<int, kChainTempi> m_chainStart{};     // first state of each period in m_chain
+    std::array<int, kChainTempi> m_chainHead{};      // ring index of position 0
+    std::vector<float> m_chainTrans;                 // log P(next period | period), kChainTempi^2
+    std::array<float, kChainTempi> m_chainPrior{};   // log tempo preference, per beat
+    float m_chainOnsetMean = 0.0f;
+    float m_chainRecent[3] = {};      // the last three onsets, newest first
+    int m_chainSwitchVotes = 0;
+    Chain m_followed;                 // the chain followed at the last estimate (period 0: none yet)
+    int m_lockedEstimates = 0;        // estimates since the grid first locked (level switches get sticky)
 
     // Phase-locked oscillator
     float m_phase = 0.0f;              // 0..1

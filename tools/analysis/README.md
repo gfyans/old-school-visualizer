@@ -31,7 +31,10 @@ For each recording:
 - An **offline reference** beat tracker (Ellis 2007 dynamic programming over a log-band onset envelope) sees
   the whole song at once, unlike the live tracker.
 - **Scores:** tempo agreement (including half/double), beat F-measure (±70 ms) of the confident live grid
-  against the reference, time to lock, build-up peak and drop times.
+  against the reference, grid jumps per minute (beats whose spacing is off the tempo by more than 12%: a phase
+  hop or a switch of metrical level, which is what you see on screen), time to lock, build-up peak and drop times.
+  On dense or syncopated music several pulses can be equally valid beats; a steady grid on a different pulse from
+  the reference scores a low F but no jumps.
 - **Chart:** `song.png` with a 10 s beat zoom (reference vs live grid vs onsets), BPM and confidence over time,
   band levels, and build-ups and drops.
 

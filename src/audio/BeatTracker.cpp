@@ -15,6 +15,31 @@ constexpr float kPhaseErrorGood = 0.06f;   // at or below: fully confident
 constexpr float kPhaseErrorBad = 0.20f;    // at or above: no confidence (random is ~0.25)
 constexpr float kPeriodicityFloor = 0.08f; // below this the onsets barely repeat at all
 constexpr float kLatencyTicks = 2.0f;      // onset detection delay, in 10 ms envelope ticks
+// Beat chains (a dynamic Bayesian beat tracker, after Krebs, Boeck & Widmer 2015, decoded online).
+constexpr float kChainTransLambda = 100.0f;  // tempo change cost per beat: exp(-lambda * |ratio - 1|)
+constexpr float kChainObsLambda = 16.0f;     // onset odds on vs off the beat
+constexpr float kChainOnsetScale = 8.0f;     // an onset this many times the recent mean reads as 0.5
+constexpr float kChainObsWeight = 3.0f;      // weight of each beat's observation against the costs
+// Each beat is observed through a 3-tick window (the beat itself is its centre, position 1),
+// whatever the tempo: onsets here are 1-2 tick spikes, so a window that grew with the period
+// (madmom's 1/16) made slow tempos pay for empty ticks.
+constexpr int kChainBeatTicks = 3;
+// Rewards and tempo preferences are per beat, so they're scaled by period / this: per second,
+// every tempo whose beats land on onsets then earns the same, and faster levels win nothing just
+// for having more beats.
+constexpr float kChainRefPeriod = 50.0f;
+constexpr float kChainPriorWeight = 0.5f;    // per-beat pull towards ~120 BPM, until the first estimate
+// Per beat, log(the tempo's autocorrelation score / the best's) times this. Without it the chains
+// favour the fastest level whose beats all land on pulses (they collect the most onsets); the
+// autocorrelation, which also checks the beat repeats at 2x and prefers ~120 BPM, picks the level.
+constexpr float kChainLevelWeight = 3.0f;
+constexpr float kChainStickMargin = 4.0f;    // log score a rival chain must win by to move the grid...
+constexpr int kChainStickVotes = 4;          // ...for this many estimates in a row (1 s)
+// A rival at another tempo (usually another metrical level: 3/4, 3/2, 2x...) needs far more: in
+// dense music the accents drift between readings for a few seconds at a time.
+constexpr float kChainLevelMargin = 25.0f;   // (a real tempo change gains ~8 a beat, drift far less)
+constexpr int kChainLevelVotes = 12;         // 3 s
+constexpr int kChainSettleEstimates = 40;    // 10 s after the first lock before level switches get sticky
 
 float Wrap01(float x) { return x - std::floor(x); }
 float WrapHalf(float x) { return x - std::floor(x + 0.5f); }   // to [-0.5, 0.5)
@@ -42,6 +67,114 @@ void BeatTracker::Configure(float sampleRate) {
     m_prevBand.fill(0.0f);
     m_prevFine.fill(0.0f);
     m_bandPeak = 0.0f;
+
+    // Beat chains: every chain starts equally likely.
+    int states = 0;
+    for (int i = 0; i < kChainTempi; ++i) {
+        m_chainStart[i] = states;
+        m_chainHead[i] = 0;
+        states += kMinChainPeriod + i;
+        const float bpm = 60.0f * kEnvelopeRate / (kMinChainPeriod + i);
+        const float octaves = std::log2(bpm / 120.0f);
+        m_chainPrior[i] = -kChainPriorWeight * 0.5f * octaves * octaves * (kMinChainPeriod + i) / kChainRefPeriod;
+    }
+    m_chain.assign(states, 0.0f);
+    m_chainTrans.assign(kChainTempi * kChainTempi, 0.0f);
+    for (int from = 0; from < kChainTempi; ++from) {
+        float* row = &m_chainTrans[from * kChainTempi];
+        float sum = 0.0f;
+        for (int to = 0; to < kChainTempi; ++to) {
+            const float ratio = float(kMinChainPeriod + to) / float(kMinChainPeriod + from);
+            row[to] = -kChainTransLambda * std::fabs(ratio - 1.0f);
+            sum += std::exp(row[to]);
+        }
+        const float logSum = std::log(sum);
+        for (int to = 0; to < kChainTempi; ++to) row[to] -= logSum;
+    }
+    m_chainOnsetMean = 0.0f;
+    std::fill(std::begin(m_chainRecent), std::end(m_chainRecent), 0.0f);
+    m_chainSwitchVotes = 0;
+    m_followed = {};
+    m_lockedEstimates = 0;
+}
+
+void BeatTracker::ChainsStep(float onset) {
+    // Onset as a probability-like 0..1 (soft-saturating against the recent average). Loose enough
+    // that a kick still outscores an off-beat hat: saturate early and every onset looks the same.
+    m_chainOnsetMean += (onset - m_chainOnsetMean) * 0.005f;   // ~2 s
+    // Each beat gets one observation: the strongest onset in its 3-tick window (centre favoured, so
+    // ties don't bias the timing). Scoring every tick of the window instead let a hat smeared over
+    // two ticks outscore a bigger, sharper kick.
+    m_chainRecent[2] = m_chainRecent[1];
+    m_chainRecent[1] = m_chainRecent[0];
+    m_chainRecent[0] = onset;
+    const float pooled = std::max({ 0.9f * m_chainRecent[0], m_chainRecent[1], 0.9f * m_chainRecent[2] });
+    const float o = pooled / (pooled + kChainOnsetScale * m_chainOnsetMean + 1e-6f);
+
+    // A beat ends: each period's last position can carry on at any period (a new beat starts).
+    float last[kChainTempi];
+    for (int j = 0; j < kChainTempi; ++j) {
+        const int p = kMinChainPeriod + j;
+        last[j] = m_chain[m_chainStart[j] + (m_chainHead[j] + p - 1) % p];
+    }
+    for (int i = 0; i < kChainTempi; ++i) {
+        float best = -1e30f;
+        for (int j = 0; j < kChainTempi; ++j) best = std::max(best, last[j] + m_chainTrans[j * kChainTempi + i]);
+        const int p = kMinChainPeriod + i;
+        m_chainHead[i] = (m_chainHead[i] + p - 1) % p;   // every position moves on one; the old last becomes 0
+        m_chain[m_chainStart[i] + m_chainHead[i]] = best + m_chainPrior[i];
+    }
+
+    // Observation: a beat explains an onset, the rest of the beat explains its absence. (Adding the
+    // off-beat term to every state changes nothing, so only the beat's own observation moves.) It
+    // lands as the window closes, on position 2, for the window centred on position 1: the beat.
+    // (The 0.02 floors keep a quiet beat from costing much more than an onset earns.)
+    const float onBeat = kChainObsWeight * (std::log(o + 0.02f) - std::log((1.0f - o) / (kChainObsLambda - 1.0f) + 0.02f));
+    for (int i = 0; i < kChainTempi; ++i) {
+        const int p = kMinChainPeriod + i;
+        m_chain[m_chainStart[i] + (m_chainHead[i] + kChainBeatTicks - 1) % p] += onBeat * p / kChainRefPeriod;
+    }
+}
+
+BeatTracker::Chain BeatTracker::BestChain() {
+    // Near-ties are common in dense or syncopated music (four equal pulses a beat, or a gallop
+    // that fits two tempos), and following the global best would hop between them. So keep
+    // following the chain followed last unless a rival clearly and lastingly beats it.
+    const bool following = m_followed.period > 0;
+    const float expected = following ? Wrap01(float(m_followed.position + kEstimateEvery) / m_followed.period) : 0.0f;
+    Chain global, local, level;   // best overall; best continuing the followed chain; best at its tempo
+    float globalScore = -1e30f, localScore = -1e30f, levelScore = -1e30f;
+    for (int i = 0; i < kChainTempi; ++i) {
+        const int p = kMinChainPeriod + i;
+        const bool sameTempo = following && std::fabs(float(p) / m_followed.period - 1.0f) < 0.06f;
+        for (int k = 0; k < p; ++k) {
+            const float s = m_chain[m_chainStart[i] + (m_chainHead[i] + k) % p];
+            if (s > globalScore) { globalScore = s; global = { p, k }; }
+            if (!sameTempo) continue;
+            if (s > levelScore) { levelScore = s; level = { p, k }; }
+            if (s > localScore && std::fabs(WrapHalf(float(k) / p - expected)) < 0.15f) { localScore = s; local = { p, k }; }
+        }
+    }
+    for (float& s : m_chain) s -= globalScore;   // keep the scores near zero
+    localScore -= globalScore;
+    levelScore -= globalScore;
+
+    Chain choice = global;
+    if (following) {
+        if (local.period == 0) { local = level; localScore = levelScore; }   // lost the phase: best at this tempo
+        // A rival at another tempo (usually another metrical level) only needs the larger margin
+        // once the grid has settled: the first lock is made before the level preference is known.
+        const bool otherLevel = std::fabs(float(global.period) / m_followed.period - 1.0f) >= 0.06f;
+        const bool sticky = otherLevel && m_lockedEstimates >= kChainSettleEstimates;
+        const float margin = sticky ? kChainLevelMargin : kChainStickMargin;
+        const int votes = sticky ? kChainLevelVotes : kChainStickVotes;
+        choice = local;
+        if (-localScore < margin) m_chainSwitchVotes = 0;
+        else if (++m_chainSwitchVotes >= votes) { m_chainSwitchVotes = 0; choice = global; }
+    }
+    m_followed = choice;
+    ++m_lockedEstimates;
+    return choice;
 }
 
 void BeatTracker::Process(const float* samples, size_t count, float sampleRate) {
@@ -111,6 +244,7 @@ void BeatTracker::ProcessHop() {
     m_envelope[m_envWrite] = onset;
     m_envWrite = (m_envWrite + 1) % kEnvelopeSize;
     ++m_hopCount;
+    ChainsStep(onset);
 
     // --- Oscillator: advance one hop, count beats, learn which beat of the bar is accented ---
     if (m_period > 0.0f) {
@@ -134,7 +268,7 @@ void BeatTracker::ProcessHop() {
     }
 
     // --- Publish ---
-    const float stability = m_candidateVotes == 0 ? 1.0f : 0.7f;
+    const float stability = m_chainSwitchVotes == 0 ? 1.0f : 0.7f;   // a rival chain is gaining
     m_state.confidence += (m_rawConfidence * stability - m_state.confidence) * 0.02f;   // ~0.5 s
     m_state.bpm = m_period > 0.0f ? 60.0f * kEnvelopeRate / m_period : 0.0f;
     m_state.beatPhase = m_phase;
@@ -160,6 +294,7 @@ float BeatTracker::EnvelopeAt(float ticksAgo) const {
 
 void BeatTracker::EstimateTempo() {
     if (m_hopCount < static_cast<uint64_t>(kTempoWindow)) return;
+    const Chain chain = BestChain();   // (always: it also renormalises the chain scores)
 
     // Recent envelope, oldest first, mean removed.
     float e[kTempoWindow];
@@ -180,75 +315,68 @@ void BeatTracker::EstimateTempo() {
         for (int i = lag; i < kTempoWindow; ++i) s += e[i] * e[i - lag];
         ac[lag] = s;
     }
-    if (ac[0] < 1e-9f) {   // silence / no onsets
+    if (ac[0] < 1e-9f) {   // silence / no onsets: the next music locks afresh
         m_rawConfidence = 0.0f;
+        m_followed = {};
+        m_lockedEstimates = 0;
         return;
     }
 
     // Score each candidate period: its autocorrelation plus its double (a true beat period
-    // also repeats at 2x), weighted by a broad preference for ~120 BPM.
+    // also repeats at 2x), weighted by a broad preference for ~120 BPM. This is the chains'
+    // metrical-level preference.
+    auto raw = [&](int lag) { return ac[lag] + 0.5f * (2 * lag <= lagTop ? ac[2 * lag] : 0.0f); };
     float score[2 * 100 + 4] = {};
     int best = lagMin;
     for (int lag = lagMin; lag <= lagMax; ++lag) {
         const float bpm = 60.0f * kEnvelopeRate / lag;
         const float octaves = std::log2(bpm / 120.0f);
-        const float prior = std::exp(-0.5f * octaves * octaves);
-        const float twice = 2 * lag <= lagTop ? ac[2 * lag] : 0.0f;
-        score[lag] = (ac[lag] + 0.5f * twice) / ac[0] * prior;
+        score[lag] = raw(lag) / ac[0] * std::exp(-0.5f * octaves * octaves);
         if (score[lag] > score[best]) best = lag;
     }
-    // Parabolic interpolation for a fractional period, on the unweighted autocorrelation (the
-    // tempo preference picks the peak, but would pull its exact position towards 120 BPM).
-    float period = static_cast<float>(best);
-    if (best > lagMin && best < lagMax) {
-        auto raw = [&](int lag) { return ac[lag] + 0.5f * (2 * lag <= lagTop ? ac[2 * lag] : 0.0f); };
-        const float a = raw(best - 1), b = raw(best), c = raw(best + 1);
-        const float denom = a - 2.0f * b + c;
-        if (denom < 0.0f) period += 0.5f * (a - c) / denom;
+    for (int i = 0; i < kChainTempi; ++i) {
+        const float ratio = score[kMinChainPeriod + i] / std::max(score[best], 1e-9f);
+        m_chainPrior[i] = kChainLevelWeight * std::log(std::clamp(ratio, 0.02f, 1.0f)) * (kMinChainPeriod + i) / kChainRefPeriod;
     }
     const float periodicity = std::max(0.0f, ac[best] / ac[0]);
     m_state.periodicity = periodicity;
     if (periodicity < 0.05f) { m_rawConfidence = 0.0f; return; }   // too aperiodic to trust
 
-    // Tempo hysteresis: small drifts are followed smoothly. A different tempo must win for
-    // ~1.5 s *and* clearly outscore the current one (real music briefly favours 4/3, 3/2...).
-    const int currentLag = static_cast<int>(std::lround(m_period));
-    const float currentScore = (currentLag >= lagMin && currentLag <= lagMax) ? score[currentLag] : 0.0f;
-    if (m_period <= 0.0f) {
-        m_period = period;
-    } else if (std::fabs(period / m_period - 1.0f) < 0.05f) {
-        m_period += 0.25f * (period - m_period);
-        m_candidateVotes = 0;
-    } else if (score[best] > (m_state.confidence > 0.5f ? 1.3f : 1.1f) * currentScore) {
-        // (A confidently locked tempo needs a much clearer winner before it moves.)
-        if (m_candidateVotes > 0 && std::fabs(period / m_candidatePeriod - 1.0f) < 0.05f) ++m_candidateVotes;
-        else { m_candidatePeriod = period; m_candidateVotes = 1; }
-        if (m_candidateVotes >= 6) {
-            m_period = m_candidatePeriod;
-            m_candidateVotes = 0;
-        }
-    } else {
-        m_candidateVotes = 0;   // the current tempo is still competitive: keep it
+    // Tempo: the beat chain picks the metrical level (and is sticky about it); the autocorrelation
+    // refines it to a fractional period, so the published BPM is smooth and exact.
+    int peak = std::clamp(chain.period, lagMin + 1, lagMax - 1);
+    for (int lag = std::max(lagMin + 1, chain.period - 2); lag <= std::min(lagMax - 1, chain.period + 2); ++lag)
+        if (raw(lag) > raw(peak)) peak = lag;
+    float chainPeriod = static_cast<float>(peak);
+    {
+        const float a = raw(peak - 1), b = raw(peak), c = raw(peak + 1);
+        const float denom = a - 2.0f * b + c;
+        if (denom < 0.0f) chainPeriod += 0.5f * (a - c) / denom;
     }
+    if (std::fabs(chainPeriod - chain.period) > 1.5f) chainPeriod = static_cast<float>(chain.period);
+    const bool firstLock = m_period <= 0.0f;
+    if (firstLock) m_period = chainPeriod;
+    else if (std::fabs(chainPeriod / m_period - 1.0f) < 0.05f) m_period += 0.25f * (chainPeriod - m_period);
+    else m_period = chainPeriod;   // the chain has already been sticky about this move
 
-    // Phase: which offset (ticks since the last beat) lines up best with recent onsets?
-    float bestOffset = 0.0f, bestScore = -1.0f, scoreSum = 0.0f;
+    // Comb contrast (diagnostic): how much the best beat position stands out from the others.
+    float bestScore = -1.0f, scoreSum = 0.0f;
     int offsets = 0;
     for (float offset = 0.0f; offset < m_period; offset += 0.5f) {
         float s = 0.0f, w = 1.0f;
         for (int k = 0; k < kCombBeats; ++k, w *= 0.85f) s += w * EnvelopeAt(offset + k * m_period);
         scoreSum += s;
         ++offsets;
-        if (s > bestScore) { bestScore = s; bestOffset = offset; }
+        bestScore = std::max(bestScore, s);
     }
-    // Comb contrast (diagnostic): how much the best beat position stands out from the others.
     const float meanScore = scoreSum / std::max(offsets, 1);
     m_state.contrast = meanScore > 1e-9f ? bestScore / meanScore - 1.0f : 0.0f;
 
     // An onset only shows up in the envelope a little after it happened (it has to get well
     // inside the analysis window), so beats are really kLatencyTicks further back than they look.
     // Measured on real recordings with tools/analysis: uncorrected, grids ran 30-40 ms late.
-    const float measured = Wrap01((bestOffset + kLatencyTicks) / m_period);
+    const float measured = Wrap01((chain.position - 1 + kLatencyTicks) / chain.period);   // (position 1 is the beat)
+    if (firstLock) m_phase = measured;   // start on the chain rather than easing in from nowhere
     const float error = WrapHalf(measured - m_phase);
 
     // Confidence from phase consistency: with a real beat, each new measurement agrees with

@@ -120,6 +120,17 @@ def tempo_match(a, b, tol=0.04):
     return any(abs(a / (b * k) - 1) < tol for k in (1, 0.5, 2, 2 / 3, 1.5))
 
 
+def grid_jumps(t, grid_beat, bpm, settled):
+    beats = np.flatnonzero((grid_beat > 0) & settled)
+    if len(beats) < 2:
+        return 0.0
+    gaps = np.diff(t[beats])
+    expected = 60.0 / np.maximum(bpm[beats[1:]], 1.0)
+    jumps = int(np.sum(np.abs(gaps / expected - 1.0) > 0.12))
+    minutes = (t[beats[-1]] - t[beats[0]]) / 60.0
+    return jumps / max(minutes, 1e-6)
+
+
 def read_csv(path):
     with open(path, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -162,6 +173,10 @@ def analyse(wav):
         f_all=max(f_measure(t[(live["grid_beat"] > 0) & settled], ref_s),
                   f_measure(t[(live["grid_beat"] > 0) & settled], ref_s[0::2]),
                   f_measure(t[(live["grid_beat"] > 0) & settled], ref_s[1::2])),
+        # Grid jumps per minute: consecutive grid beats whose spacing is off the published tempo
+        # by more than 12% (a phase hop or a switch of metrical level). This is what shows on
+        # screen; F can't see it, since it marks a steady grid at another valid level as wrong.
+        jumps=grid_jumps(t, live["grid_beat"], live["bpm"], settled),
         # Median of each tracker diagnostic after warm-up.
         diag={k: float(np.median(live[k][settled])) for k in ("periodicity", "phase_error", "percussive") if k in live},
     )
@@ -218,16 +233,20 @@ def main():
         return 1
     results = []
     for wav in files:
+        if os.path.getsize(wav) < 2_000_000:   # under ~10 s: too short to score (a stopped recording)
+            print(f"{os.path.basename(wav)[:48]:48}  skipped: too short")
+            continue
         r, _ = analyse(wav)
         results.append(r)
         print(f"{r['name'][:48]:48}  live {r['live_bpm']:6.1f}  ref {r['ref_bpm']:6.1f}  "
               f"{'OK ' if r['tempo_ok'] else 'BAD'}  conf {r['conf']:.2f}  lock {r['lock']:5.1f}s  "
-              f"gridF {r['f_grid']:.2f} (all {r['f_all']:.2f})  " +
+              f"gridF {r['f_grid']:.2f} (all {r['f_all']:.2f})  jumps/min {r['jumps']:4.1f}  " +
               " ".join(f"{k[:5]} {v:.2f}" for k, v in r["diag"].items()) + f"  build {r['build']:.2f}  "
               f"drops {', '.join(f'{d:.0f}s' for d in r['drops']) or '-'}")
     ok = sum(r["tempo_ok"] for r in results)
     print(f"\ntempo agreement {ok}/{len(results)}, mean grid F {np.mean([r['f_grid'] for r in results]):.2f}, "
-          f"mean onset F {np.mean([r['f_onset'] for r in results]):.2f}")
+          f"mean onset F {np.mean([r['f_onset'] for r in results]):.2f}, "
+          f"mean grid jumps/min {np.mean([r['jumps'] for r in results]):.1f}")
     return 0
 
 
