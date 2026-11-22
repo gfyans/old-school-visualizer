@@ -62,3 +62,5 @@ You need Visual Studio 2022 or later with the C++ desktop workload. Then run:
 ```powershell
 .\build.ps1 -Run
 ```
+
+Want to make your own? See [Adding a visualiser](docs/adding-a-visualiser.md).
