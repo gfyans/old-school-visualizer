@@ -26,6 +26,7 @@ It's one small `.exe`. There's no installer, and it keeps itself up to date.
 * **Detonation**: a city at night, waiting for the drop.
 * **Glass City**: a flight through cyberspace, a city of glass with currents of light running through it.
 * **Spectrum**: a classic spectrum analyser.
+* **Dot Field**: 400,000 neon dots on a plane, rising into a landscape made from the music.
 
 ## Using it
 

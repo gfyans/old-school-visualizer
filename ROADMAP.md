@@ -38,7 +38,9 @@ Where this is going next, in order. ✅ = done.
   centre and grid layouts, ASCII / dither / LED / scan lines); ✅ Detonation (city, dome, void, crater, camera director; blasts on drops,
   released build-ups and big phrases; a dome that punches with the kicks);
   ✅ Spectrum (Studio and Radial looks; physical peak caps and drop fireworks);
-  ✅ Glass City (a flight through a cyberspace city of glass; Overdrive on big moments).
+  ✅ Glass City (a flight through a cyberspace city of glass; Overdrive on big moments);
+  ✅ Dot Field (an isometric plane of 400,000 dots: terrain and equaliser motions, five layouts, data beams;
+  splash and breach on big moments).
 - **Feel:** ✅ one shared big moment for every visualiser (drops, released build-ups and big phrases, about one
   every 20-25 s in drum-driven songs); ✅ auto-cycle; ✅ Random scene changes (a new scene and look every minute or so, on the phrase);
   ✅ transitions with character; ✅ filters over every scene (`X`).

@@ -23,6 +23,7 @@
 #include "viz/detonation/DetonationVisualizer.h"
 #include "viz/glasscity/GlassCityVisualizer.h"
 #include "viz/spectrum/SpectrumVisualizer.h"
+#include "viz/dots/DotsVisualizer.h"
 #include "g_filter_ascii_ps.h"
 #include "g_filter_dither_ps.h"
 #include "g_filter_halftone_ps.h"
@@ -57,6 +58,7 @@ void RegisterVisualizers(VisualizerHost& host) {
     host.Add(std::make_unique<DetonationVisualizer>());
     host.Add(std::make_unique<GlassCityVisualizer>());
     host.Add(std::make_unique<SpectrumVisualizer>());
+    host.Add(std::make_unique<DotsVisualizer>());
 }
 
 // To add a filter: write shaders/filter_<name>_ps.hlsl and add it here (or implement IFilter for one
