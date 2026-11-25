@@ -62,6 +62,9 @@ float Ribbon(float2 xz, int k, float y) {
     centre = max(centre, 2.5);
     float d = xz.y - centre;
     float w = 0.28 + 0.12 * kf;
+    // Far from the ribbon's path its glow is below 0.00005 of the core (both terms): skip the rest,
+    // which is most of the work (the edges' and shimmer's noise). Most samples land out here.
+    if (d * d > 100.0 * w * w) return 0.0;
     float glow = exp(-d * d / (w * w)) + 0.22 * exp(-d * d / (12.0 * w * w));   // soft core and wide glow
     float rays = Noise1(x * 1.6 + animTime * 0.2 + kf * 5.0);
     float shimmer = 0.55 + 0.45 * rays * rays;
@@ -83,15 +86,20 @@ float Ribbon(float2 xz, int k, float y) {
     return glow * shimmer * flareBoost * edge * top * (1.0 - 0.3 * kf);
 }
 
-float3 Aurora(float3 rd, float jitter) {
+float3 Aurora(float3 rd, float jitter, int layers) {
     float3 col = 0;
     if (rd.y <= 0.01) return col;
     float yBase = 1.4, yRange = 7.9 * heightScale;   // (each ribbon's own lower edge is higher and uneven)
-    [loop] for (int i = 0; i < kLayers; ++i) {
-        float hf = (i + jitter) / kLayers;                    // 0 bottom .. 1 top of the ribbons
+    // Every ribbon's path lies within this band of depth (Ribbon: centre 2.5 .. 9 + 2 * 3.5 + 7.7 sway +
+    // 1.25, plus 10 widths of glow). Each layer is further along the ray than the last, so once a layer
+    // is outside the band the rest are too.
+    const float zMin = 2.5 - 5.2, zMax = 17.25 + 7.7 * abs(sway) + 5.2;
+    [loop] for (int i = 0; i < layers; ++i) {
+        float hf = (i + jitter) / layers;                    // 0 bottom .. 1 top of the ribbons
         float y = yBase + hf * hf * yRange;                   // layers spread out higher up
         float t = (y - kCamHeight) / rd.y;
         float2 xz = rd.xz * t;
+        if (xz.y > zMax || xz.y < zMin) break;
         float light = 0.0;
         [unroll] for (int k = 0; k < kRibbons; ++k) light += Ribbon(xz, k, y);
         float profile = exp(-hf * 0.9 / heightScale);         // a gentle fade upwards (each ribbon's top is its own)
@@ -100,7 +108,7 @@ float3 Aurora(float3 rd, float jitter) {
         c += lowCol * kick * 0.6 * exp(-hf * 9.0);            // kicks light up the lower edge
         col += c * light * profile * (0.6 + 1.4 * hf) / (1.0 + t * 0.02);   // weight: upper layers are spread thinner
     }
-    return col * brightness * (1.0 + 0.35 * kick) * (9.5 / kLayers);
+    return col * brightness * (1.0 + 0.35 * kick) * (9.5 / layers);
 }
 
 // Turns v about the axis k by angle a (Rodrigues).
@@ -255,14 +263,14 @@ float NearPines(float az, float e, out float snow) {
 }
 
 // Everything above the ice: sky, stars, aurora, treeline and pines.
-float3 Scene(float3 rd, float jitter) {
+float3 Scene(float3 rd, float jitter, int layers) {
     float3 sky = lerp(skyHorizon, skyTop, saturate(rd.y * 1.6));
     sky += lowCol * brightness * 0.08 * exp(-max(rd.y, 0.0) * 7.0);   // airglow low in the sky
     float bandMask;
     float3 milkyWay = MilkyWay(rd, bandMask);
     float above = saturate(rd.y * 8.0);
     sky += (StarTrails(rd, bandMask) + milkyWay) * above * saturate(1.05 - brightness * 0.45);   // the aurora outshines them
-    sky += Aurora(rd, jitter) + Corona(rd) + Meteor(rd) * above;
+    sky += Aurora(rd, jitter, layers) + Corona(rd) + Meteor(rd) * above;
     float az = atan2(rd.x, rd.z);
     float glow = dot(lowCol, float3(0.3, 0.6, 0.1)) * brightness;     // the aurora lights the snow
     if (rd.y < FarTreeline(az)) sky = landCol * 0.8;
@@ -300,7 +308,7 @@ float4 main(VSOut i) : SV_Target {
 
     float3 col;
     if (rd.y >= 0.0) {
-        col = Scene(rd, jitter);
+        col = Scene(rd, jitter, kLayers);
     } else {
         float t = kCamHeight / -rd.y;
         float2 w = rd.xz * t;                                   // position on the ice
@@ -318,7 +326,7 @@ float4 main(VSOut i) : SV_Target {
         // Polished ice mirrors the scene; cracks and gentle unevenness (more with bass) distort it.
         float2 bump = float2(Noise2(w * 2.0 + animTime * 0.05) - 0.5, Noise2(w * 2.0 + 7.0) - 0.5);
         float3 rr = normalize(float3(rd.x + bump.x * (0.01 + ripple * 0.012), -rd.y + bump.y * (0.008 + ripple * 0.01), rd.z));
-        float3 reflection = Scene(rr, jitter);
+        float3 reflection = Scene(rr, jitter, kLayers / 2);   // rippled and dimmed by the ice: half the layers will do
         float fresnel = 0.45 + 0.55 * pow(1.0 - saturate(-rd.y * 2.5), 3.0);
         float3 ice = reflection * 0.85 * fresnel + float3(0.01, 0.03, 0.04);
 
