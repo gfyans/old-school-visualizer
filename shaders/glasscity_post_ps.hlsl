@@ -7,6 +7,7 @@
 cbuffer GlassPost : register(b3) {   // matches GlassPostConstants in GlassCityVisualizer.cpp
     float2 vanish;   float blur;   float bloom;       // vanishing point (uv); blur length (share of the way there)
     float flash;     float aberr;  float exposure;  float grain;
+    float sharpen;   float3 postPad;   // after temporal upscaling: give back the crispness resampling softens
 };
 
 Texture2D Image : register(t0);   // HDR scene, with mips
@@ -38,6 +39,15 @@ float4 main(VSOut i) : SV_Target {
         col.b += Image.SampleLevel(Linear, uv - ca, 0).b;
     }
     col /= kTaps;
+
+    // Sharpening (unsharp mask on the plain image), easing off as the speed blur takes over.
+    if (sharpen > 0.0) {
+        int2 p = int2(i.pos.xy);
+        float3 c0 = Image.Load(int3(p, 0)).rgb;
+        float3 ring = Image.Load(int3(p + int2(1, 0), 0)).rgb + Image.Load(int3(p - int2(1, 0), 0)).rgb +
+                      Image.Load(int3(p + int2(0, 1), 0)).rgb + Image.Load(int3(p - int2(0, 1), 0)).rgb;
+        col = max(col + sharpen * saturate(1.0 - blur * 4.0) * (c0 - 0.25 * ring), 0.0);
+    }
 
     float3 b = 0;
     [unroll] for (int m = 1; m <= 6; ++m) {

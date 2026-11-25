@@ -28,6 +28,7 @@ cbuffer GlassCity : register(b2) {   // matches GlassCityConstants in GlassCityV
     float4 ringZ;                      // where each ring started (z, on the camera's avenue)
     float2 shockPos; float laneX;      float tileSeed;   // shockwave centre (xz); the avenue's centre x; changes on snares
     float streakPhase; float streakAmt; float streakLen; float pad;
+    float2 jitter;     float outHeight; float pad2;   // sub-pixel offset (pixels of this target); output height (sizes lines)
 };
 
 static const float kCeil = 9.0;        // height of the ceiling (and of the slab the DDA walks)
@@ -88,6 +89,8 @@ bool FloorTower(int2 c, out Box b) {
 }
 
 bool CeilBlock(int2 c, out Box b) {
+    b = (Box)0;
+    if (ceiling <= 0.01) return false;   // open sky: no need to hash every cell
     int2 hc = HashCell(c);
     float3 h = Hash33(int3(hc, 23));
     int mx = Mod(c.x, kAvenue), mz = Mod(c.y, kStreet);
@@ -97,7 +100,7 @@ bool CeilBlock(int2 c, out Box b) {
     b.lo = float3(c.x + inset, kCeil - len, c.y + inset);
     b.hi = float3(c.x + 1.0 - inset, kCeil, c.y + 1.0 - inset);
     b.id = int3(hc, 1);
-    return ceiling > 0.01 && h.z < 0.5;
+    return h.z < 0.5;
 }
 
 // Floating glass plates, several cells wide (each cell tests the whole plate; the caller keeps only the
@@ -106,6 +109,8 @@ bool Plate(int2 c, out Box b) {
     int2 g = int2(floor(float2(c) / float2(4.0, 3.0)));
     int2 hg = int2(g.x, Mod(g.y, kPeriod / 3));
     float3 h = Hash33(int3(hg, 37));
+    b = (Box)0;
+    if (h.z >= 0.22) return false;   // most groups have no plate: skip the second hash
     float3 h2 = Hash33(int3(hg, 41));
     float2 org = float2(g) * float2(4.0, 3.0);
     float2 lo = org + floor(h2.xy * float2(2.0, 1.5)) + 0.04;
@@ -115,7 +120,7 @@ bool Plate(int2 c, out Box b) {
     b.lo = float3(lo.x, y, lo.y);
     b.hi = float3(hi.x, y + th, hi.y);
     b.id = int3(hg, 2);
-    return h.z < 0.22 && c.x >= floor(lo.x) && c.x < hi.x && c.y >= floor(lo.y) && c.y < hi.y;
+    return c.x >= floor(lo.x) && c.x < hi.x && c.y >= floor(lo.y) && c.y < hi.y;
 }
 
 bool BoxSpan(float3 ro, float3 inv, float3 lo, float3 hi, out float tn, out float tf, out float3 nn, out float3 nf) {
@@ -205,14 +210,16 @@ float4 ShadeFace(float3 p, float3 n, Box b, float t, float3 rd, bool back, float
 }
 
 // Walk the cells front to back, adding up every glass face the ray passes through. T is how much light
-// still gets through; tEnd and kind say where the ray ends: 0 sky, 1 floor, 2 ceiling.
-float3 TraceCity(float3 ro, float3 rd, int maxSteps, int maxLayers, float pix, inout float3 T, out float tEnd, out int kind) {
+// still gets through; tEnd and kind say where the ray ends: 0 sky, 1 floor, 2 ceiling; tFirst is the first
+// glass it meets (or tEnd), which the temporal upscaler reprojects by.
+float3 TraceCity(float3 ro, float3 rd, int maxSteps, int maxLayers, float pix, inout float3 T, out float tEnd, out int kind, out float tFirst) {
     float3 col = 0;
     float3 inv = 1.0 / (abs(rd) < 1e-6 ? (rd >= 0.0 ? 1e-6 : -1e-6) : rd);
     float tFloor = rd.y < 0.0 ? -ro.y / rd.y : 1e9;
     float tCeil = rd.y > 0.0 && ro.y < kCeil ? (kCeil - ro.y) / rd.y : 1e9;   // (from above it, there's no ceiling to hit)
     tEnd = min(min(tFloor, tCeil), kFar);
     kind = tEnd >= kFar ? 0 : tFloor < tCeil ? 1 : (ceiling > 0.02 ? 2 : 0);
+    tFirst = tEnd;
     float3 tint = lerp(1.0, glassCol, 0.2);
 
     int2 cell = int2(floor(ro.xz));
@@ -234,6 +241,7 @@ float3 TraceCity(float3 ro, float3 rd, int maxSteps, int maxLayers, float pix, i
                 float3 p = ro + rd * tn;
                 if (k < 2 || all(int2(floor(p.xz)) == cell)) {
                     float4 s = ShadeFace(p, nn, b, tn, rd, false, pix);
+                    tFirst = min(tFirst, tn);
                     col += T * s.rgb * FogT(tn);
                     T *= (1.0 - s.a) * tint;
                     ++layers;
@@ -352,14 +360,17 @@ float3 Streaks(float3 ro, float3 rd, float tEnd, float pix) {
 
 float4 main(VSOut i) : SV_Target {
     float aspect = iResolution.x / iResolution.y;
-    float2 ndc = (i.uv * 2.0 - 1.0) * float2(aspect, -1.0);
+    float2 uv = i.uv + jitter / iResolution.xy;   // this frame's sub-pixel position (temporal upscaling)
+    float2 ndc = (uv * 2.0 - 1.0) * float2(aspect, -1.0);
     float3 rd = normalize(camFwd * focal + camRight * ndc.x + camUp * ndc.y);
-    float pix = 2.0 / (iResolution.y * focal);
+    // Lines and tiles are sized for the output's pixels, not this (possibly smaller) target's: the
+    // upscaler gathers them back to full sharpness over a few frames.
+    float pix = 2.0 / (outHeight * focal);
 
     float3 T = 1.0;
-    float tEnd;
+    float tEnd, tFirst, tUnused;
     int kind;
-    float3 col = TraceCity(camPos, rd, 160, 5, pix, T, tEnd, kind);
+    float3 col = TraceCity(camPos, rd, 160, 5, pix, T, tEnd, kind, tFirst);
     float3 p = camPos + rd * tEnd;
     float3 surf = Terminal(camPos, rd, tEnd, kind, pix);
 
@@ -369,7 +380,7 @@ float4 main(VSOut i) : SV_Target {
         float3 T2 = 1.0;
         float t2;
         int kind2;
-        float3 refl = TraceCity(p + rr * 0.001, rr, 80, 3, pix, T2, t2, kind2);
+        float3 refl = TraceCity(p + rr * 0.001, rr, 80, 3, pix, T2, t2, kind2, tUnused);
         refl += T2 * lerp(Env(rr), Terminal(p, rr, t2, kind2, pix), FogT(t2));
         float fres = 0.3 + 0.6 * pow(1.0 - abs(rd.y), 5.0);
         surf += refl * fres;
@@ -378,5 +389,5 @@ float4 main(VSOut i) : SV_Target {
     col += Streaks(camPos, rd, tEnd, pix);
     // Never let a stray NaN or infinity out: the bloom's mips would spread it into black squares.
     if (any(isnan(col)) || any(isinf(col))) col = 0.0;
-    return float4(min(col, 64.0), 1.0);
+    return float4(min(col, 64.0), tFirst);   // alpha: distance to the first glass, for reprojection
 }

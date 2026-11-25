@@ -28,7 +28,9 @@ public:
     const wchar_t* Name() const override { return L"Glass City"; }
     bool CreateResources(ID3D11Device* device) override;
     void ReleaseResources() override;
-    float RenderScale() const override { return 0.75f; }
+    // Traced at kTraceScale of this and upscaled temporally, so full resolution is affordable.
+    float RenderScale() const override { return 1.0f; }
+    void Activate() override { m_historyValid = false; }   // don't reproject a stale image
     void Update(const AudioFeatures& audio, float dt) override;
     void Render(Renderer& renderer, float time, float dt) override;
     bool OnKey(UINT vk) override;
@@ -55,10 +57,19 @@ private:
     Palette CurrentPalette() const;
 
     Microsoft::WRL::ComPtr<ID3D11Device> m_device;
-    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_ps, m_postPs;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_cb, m_postCb;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_ps, m_postPs, m_taaPs;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> m_cb, m_postCb, m_taaCb;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_clamp;
-    RenderTarget m_scene;
+    // Temporal upscaling: jittered trace (smaller) -> resolve against reprojected history (full size).
+    RenderTarget m_trace;        // HDR + distance to the first glass
+    RenderTarget m_resolved;     // full size, with mips for the bloom
+    RenderTarget m_history[2];   // ping-pong accumulated image
+    int m_historyIndex = 0;
+    bool m_historyValid = false;
+    bool m_taaEnabled = true;    // VISUALIZER_TAA=0: trace at full size, no accumulation (comparisons)
+    uint32_t m_frame = 0;
+    float m_camPos[3] = {}, m_prevPos[3] = {};
+    float m_prevBasis[3][3] = {}, m_prevFocal = 1.25f;
     std::mt19937 m_rng;
 
     int m_look = 0;
@@ -90,8 +101,8 @@ private:
     int m_beatsInShot = 0;
     bool m_fire = false, m_silent = true;
 
-    float m_constants[60] = {};
-    float m_post[8] = {};
+    float m_constants[64] = {};
+    float m_post[12] = {};
     float m_camFwd[3] = { 0, 0, 1 }, m_camRight[3] = { 1, 0, 0 }, m_camUp[3] = { 0, 1, 0 }, m_focal = 1.25f;
     std::wstring m_message;
 };

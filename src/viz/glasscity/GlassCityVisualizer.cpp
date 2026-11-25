@@ -2,6 +2,7 @@
 #include "render/Renderer.h"
 #include "g_glasscity_ps.h"
 #include "g_glasscity_post_ps.h"
+#include "g_glasscity_taa_ps.h"
 
 #include <algorithm>
 #include <cmath>
@@ -25,14 +26,31 @@ struct GlassCityConstants {   // matches cbuffer GlassCity in glasscity_ps.hlsl
     float ringZ[4];
     float shockPos[2]; float laneX;  float tileSeed;
     float streakPhase, streakAmt, streakLen, pad;
+    float jitter[2];   float outHeight; float pad2;
 };
-static_assert(sizeof(GlassCityConstants) == sizeof(float) * 60);
+static_assert(sizeof(GlassCityConstants) == sizeof(float) * 64);
+
+struct GlassTaaConstants {   // matches cbuffer GlassTaa in glasscity_taa_ps.hlsl
+    float prevRight[3]; float prevFocal;
+    float prevUp[3];    float blend;
+    float prevFwd[3];   float historyValid;
+    float camDelta[3];  float pad0;
+    float jitter[2];    float pad1[2];
+};
+static_assert(sizeof(GlassTaaConstants) % 16 == 0);
+
+// Temporal upscaling: the city is traced at this share of the output size (about half the pixels)
+// and each new sample is blended in at up to this weight.
+constexpr float kTraceScale = 0.7f;
+constexpr float kTaaBlend = 0.3f;
+constexpr float kSharpen = 0.5f;   // the post pass gives back the crispness the resampling softens
 
 struct GlassPostConstants {   // matches cbuffer GlassPost in glasscity_post_ps.hlsl
     float vanish[2]; float blur; float bloom;
     float flash, aberr, exposure, grain;
+    float sharpen; float pad[3];
 };
-static_assert(sizeof(GlassPostConstants) == sizeof(float) * 8);
+static_assert(sizeof(GlassPostConstants) == sizeof(float) * 12);
 
 constexpr float kPi = 3.14159265f;
 constexpr int kAvenue = 8;
@@ -82,12 +100,15 @@ GlassCityVisualizer::GlassCityVisualizer() : m_rng(std::random_device{}()) {
             if (ceiling >= 0) m_ceiling = m_ceilingTarget = ceiling ? 1.0f : 0.0f;
         }
     }
+    // Developer switch for before/after comparisons: VISUALIZER_TAA=0 traces at full size, no upscaling.
+    if (GetEnvironmentVariableW(L"VISUALIZER_TAA", env, ARRAYSIZE(env)) > 0 && env[0] == L'0') m_taaEnabled = false;
 }
 
 bool GlassCityVisualizer::CreateResources(ID3D11Device* device) {
     m_device = device;
     if (FAILED(device->CreatePixelShader(g_glasscity_ps, sizeof(g_glasscity_ps), nullptr, &m_ps))) return false;
     if (FAILED(device->CreatePixelShader(g_glasscity_post_ps, sizeof(g_glasscity_post_ps), nullptr, &m_postPs))) return false;
+    if (FAILED(device->CreatePixelShader(g_glasscity_taa_ps, sizeof(g_glasscity_taa_ps), nullptr, &m_taaPs))) return false;
     D3D11_BUFFER_DESC cb{};
     cb.ByteWidth = sizeof(GlassCityConstants);
     cb.Usage = D3D11_USAGE_DYNAMIC;
@@ -96,6 +117,9 @@ bool GlassCityVisualizer::CreateResources(ID3D11Device* device) {
     if (FAILED(device->CreateBuffer(&cb, nullptr, &m_cb))) return false;
     cb.ByteWidth = sizeof(GlassPostConstants);
     if (FAILED(device->CreateBuffer(&cb, nullptr, &m_postCb))) return false;
+    cb.ByteWidth = sizeof(GlassTaaConstants);
+    if (FAILED(device->CreateBuffer(&cb, nullptr, &m_taaCb))) return false;
+    m_historyValid = false;
     D3D11_SAMPLER_DESC s{};
     s.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     s.AddressU = s.AddressV = s.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -104,7 +128,12 @@ bool GlassCityVisualizer::CreateResources(ID3D11Device* device) {
 }
 
 void GlassCityVisualizer::ReleaseResources() {
-    m_scene.Reset();
+    m_trace.Reset();
+    m_resolved.Reset();
+    m_history[0].Reset();
+    m_history[1].Reset();
+    m_taaCb.Reset();
+    m_taaPs.Reset();
     m_clamp.Reset();
     m_postCb.Reset();
     m_cb.Reset();
@@ -348,6 +377,7 @@ void GlassCityVisualizer::Update(const AudioFeatures& audio, float dt) {
     Copy3(m_camFwd, c.camFwd);
     Copy3(m_camRight, c.camRight);
     Copy3(m_camUp, c.camUp);
+    Copy3(m_camPos, c.camPos);
     m_focal = c.focal;
 
     GlassPostConstants p{};
@@ -364,12 +394,50 @@ void GlassCityVisualizer::Render(Renderer& renderer, float time, float dt) {
     ID3D11DeviceContext* ctx = renderer.Context();
     ID3D11RenderTargetView* hostTarget = renderer.BoundTarget();
     const int w = renderer.BoundWidth(), h = renderer.BoundHeight();
-    if (m_scene.width != w || m_scene.height != h) m_scene.Create(m_device.Get(), w, h, DXGI_FORMAT_R11G11B10_FLOAT, true);
-    if (!m_scene.rtv) return;
+    const bool taa = m_taaEnabled;
+    const int tw = taa ? std::max(1, static_cast<int>(std::lround(w * kTraceScale))) : w;
+    const int th = taa ? std::max(1, static_cast<int>(std::lround(h * kTraceScale))) : h;
+    if (m_trace.width != tw || m_trace.height != th) {
+        m_trace.Create(m_device.Get(), tw, th, DXGI_FORMAT_R16G16B16A16_FLOAT, !taa);   // without upscaling it feeds the bloom directly
+        m_historyValid = false;
+    }
+    if (taa && (m_resolved.width != w || m_resolved.height != h)) {
+        m_resolved.Create(m_device.Get(), w, h, DXGI_FORMAT_R11G11B10_FLOAT, true);
+        m_history[0].Create(m_device.Get(), w, h, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        m_history[1].Create(m_device.Get(), w, h, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        m_historyValid = false;
+    }
+    if (!m_trace.rtv || (taa && (!m_resolved.rtv || !m_history[0].rtv || !m_history[1].rtv))) return;
+
+    // Halton(2,3) sub-pixel jitter: 8 well-spread positions per cycle.
+    static constexpr float kHalton[8][2] = { { 0.500f, 0.333f }, { 0.250f, 0.667f }, { 0.750f, 0.111f }, { 0.125f, 0.444f },
+                                             { 0.625f, 0.778f }, { 0.375f, 0.222f }, { 0.875f, 0.556f }, { 0.0625f, 0.889f } };
+    ++m_frame;
+    GlassCityConstants c;
+    memcpy(&c, m_constants, sizeof(c));
+    c.jitter[0] = taa ? kHalton[m_frame % 8][0] - 0.5f : 0.0f;
+    c.jitter[1] = taa ? kHalton[m_frame % 8][1] - 0.5f : 0.0f;
+    c.outHeight = static_cast<float>(h);
+
+    GlassTaaConstants t{};
+    float jump = 0.0f;
+    for (int i = 0; i < 3; ++i) {
+        t.prevRight[i] = m_prevBasis[0][i];
+        t.prevUp[i] = m_prevBasis[1][i];
+        t.prevFwd[i] = m_prevBasis[2][i];
+        t.camDelta[i] = m_camPos[i] - m_prevPos[i];
+        jump = std::max(jump, std::fabs(t.camDelta[i]));
+    }
+    t.prevFocal = m_prevFocal;
+    t.blend = kTaaBlend;
+    t.historyValid = m_historyValid && jump < 20.0f ? 1.0f : 0.0f;   // (the city wraps every kPeriod: a jump)
+    t.jitter[0] = c.jitter[0];
+    t.jitter[1] = c.jitter[1];
 
     // The vanishing point (straight down the flight path) on screen, for the speed blur.
     GlassPostConstants post;
     memcpy(&post, m_post, sizeof(post));
+    post.sharpen = taa ? kSharpen : 0.0f;
     {
         const float aspect = static_cast<float>(w) / std::max(h, 1);
         const float z = std::max(m_camFwd[2], 0.2f);
@@ -384,28 +452,57 @@ void GlassCityVisualizer::Render(Renderer& renderer, float time, float dt) {
             ctx->Unmap(buffer, 0);
         }
     };
-    upload(m_cb.Get(), m_constants, sizeof(GlassCityConstants));
+    upload(m_cb.Get(), &c, sizeof(c));
     upload(m_postCb.Get(), &post, sizeof(post));
-
-    // Pass 1: the city, in HDR.
-    renderer.BindTarget(m_scene.rtv.Get(), w, h, time, dt);
+    upload(m_taaCb.Get(), &t, sizeof(t));
     ID3D11Buffer* cb = m_cb.Get();
+    ID3D11SamplerState* clamp = m_clamp.Get();
+    ID3D11ShaderResourceView* none[2] = {};
+
+    // Pass 1: the city, in HDR (jittered, and smaller when upscaling).
+    renderer.BindTarget(m_trace.rtv.Get(), tw, th, time, dt);
     ctx->PSSetConstantBuffers(2, 1, &cb);
     renderer.DrawFullscreen(m_ps.Get());
 
-    // Pass 2: speed blur, bloom and tone mapping into the host's target.
+    // Pass 2: resolve against the reprojected history -> the full-size image and the next history.
+    RenderTarget* image = &m_trace;
+    if (taa) {
+        RenderTarget& prev = m_history[m_historyIndex];
+        RenderTarget& next = m_history[1 - m_historyIndex];
+        renderer.BindTarget(m_resolved.rtv.Get(), w, h, time, dt);   // frame constants and viewport
+        ID3D11RenderTargetView* targets[2] = { m_resolved.rtv.Get(), next.rtv.Get() };
+        ctx->OMSetRenderTargets(2, targets, nullptr);
+        ID3D11Buffer* taaCb = m_taaCb.Get();
+        ctx->PSSetConstantBuffers(2, 1, &cb);
+        ctx->PSSetConstantBuffers(3, 1, &taaCb);
+        ID3D11ShaderResourceView* inputs[2] = { m_trace.srv.Get(), prev.srv.Get() };
+        ctx->PSSetShaderResources(0, 2, inputs);
+        ctx->PSSetSamplers(0, 1, &clamp);
+        renderer.DrawFullscreen(m_taaPs.Get());
+        ctx->PSSetShaderResources(0, 2, none);
+        m_historyIndex = 1 - m_historyIndex;
+        m_historyValid = true;
+        image = &m_resolved;
+    }
+    for (int i = 0; i < 3; ++i) {
+        m_prevBasis[0][i] = m_camRight[i];
+        m_prevBasis[1][i] = m_camUp[i];
+        m_prevBasis[2][i] = m_camFwd[i];
+        m_prevPos[i] = m_camPos[i];
+    }
+    m_prevFocal = m_focal;
+
+    // Pass 3: speed blur, bloom and tone mapping into the host's target.
     ctx->OMSetRenderTargets(0, nullptr, nullptr);
-    ctx->GenerateMips(m_scene.srv.Get());
+    ctx->GenerateMips(image->srv.Get());
     renderer.BindTarget(hostTarget, w, h, time, dt);
     ID3D11Buffer* postCb = m_postCb.Get();
-    ID3D11ShaderResourceView* srv = m_scene.srv.Get();
-    ID3D11SamplerState* clamp = m_clamp.Get();
+    ID3D11ShaderResourceView* srv = image->srv.Get();
     ctx->PSSetConstantBuffers(3, 1, &postCb);
     ctx->PSSetShaderResources(0, 1, &srv);
     ctx->PSSetSamplers(0, 1, &clamp);
     renderer.DrawFullscreen(m_postPs.Get());
-    ID3D11ShaderResourceView* none = nullptr;
-    ctx->PSSetShaderResources(0, 1, &none);
+    ctx->PSSetShaderResources(0, 1, none);
 }
 
 bool GlassCityVisualizer::OnKey(UINT vk) {
