@@ -107,6 +107,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
 
     Settings settings;
     settings.Load();
+    if (wchar_t scene[128] = {}; GetEnvironmentVariableW(L"VISUALIZER_SCENE", scene, ARRAYSIZE(scene)) > 0)
+        settings.visualizer = scene;   // dev: start on this visualiser
 
     Window window;
     const UINT dpi = GetDpiForSystem();
@@ -745,6 +747,33 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             overlay.SetIndicator(rec, true);
         } else {
             overlay.SetIndicator(L"", false);
+        }
+
+        // Dev benchmark: VISUALIZER_BENCH_LOG=<file> appends the active scene's average GPU time
+        // (seconds 5-25, after warm-up) and quits. Pair with VISUALIZER_SCENE and VISUALIZER_RENDER_SCALE.
+        {
+            static std::wstring benchLog = [] {
+                wchar_t buf[MAX_PATH] = {};
+                return GetEnvironmentVariableW(L"VISUALIZER_BENCH_LOG", buf, MAX_PATH) > 0 ? std::wstring(buf) : std::wstring();
+            }();
+            static float benchTime = 0.0f, benchSum = 0.0f;
+            static int benchFrames = 0;
+            if (!benchLog.empty()) {
+                // Pictures to judge the quality by (taken next frame) at 8, 13, 18 and 23 s.
+                const bool shotDue = std::floor((benchTime - 3.0f) / 5.0f) != std::floor((benchTime + dt - 3.0f) / 5.0f) && benchTime > 5.0f;
+                benchTime += dt;
+                if (shotDue) screenshotPending = true;
+                if (benchTime > 5.0f && host.ActiveGpuMs() > 0.0f) { benchSum += host.ActiveGpuMs(); ++benchFrames; }
+                if (benchTime > 25.0f) {
+                    FILE* f = nullptr;
+                    if (_wfopen_s(&f, benchLog.c_str(), L"a") == 0 && f) {
+                        fwprintf(f, L"%ls\t%dx%d\t%.3f ms\t%d frames\n", host.Active().Name(), host.ActiveRenderWidth(),
+                                 host.ActiveRenderHeight(), benchFrames ? benchSum / benchFrames : 0.0f, benchFrames);
+                        fclose(f);
+                    }
+                    ExitProcess(0);   // no settings save: a benchmark run leaves nothing behind
+                }
+            }
         }
 
         overlay.Update(dt);
