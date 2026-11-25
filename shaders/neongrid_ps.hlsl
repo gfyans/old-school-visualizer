@@ -18,6 +18,7 @@ cbuffer Neon : register(b2) {   // matches NeonConstants in NeonGridVisualizer.c
     float3 gridA;      float bass;        // left-hand neon
     float3 gridB;      float gateSpacing; // right-hand neon
     float3 groundCol;  float neonPad;
+    float shockR;      float shockZ;      float surge;       float hit;   // big hit: sun shockwave, light wall; kick flare
 };
 
 Texture2D<float> History : register(t0);   // 64 bands x 128 rows (rows = distance)
@@ -46,7 +47,9 @@ float VertexHeight(int ix, int iz) {
     int row = (int)((uint)(zi - (int)farDist + 1024) & (uint)(kRows - 1));   // row k sits at k + farDist
     float s = History.Load(int3(band, row, 0));
     float jitter = Hash33(int3(ix, iz & 1023, 99)).x;          // low-poly irregularity
-    return maxHeight * side * ((0.08 + 0.22 * jitter) * (0.4 + d) + pow(saturate(s), 1.4) * (0.15 + 1.1 * d * d));
+    float wz = (float)iz - travel - shockZ;                     // distance from the surge's light wall
+    float lift = 1.0 + 0.9 * surge * exp(-wz * wz * 0.02);
+    return maxHeight * side * lift * ((0.08 + 0.22 * jitter) * (0.4 + d) + pow(saturate(s), 1.4) * (0.15 + 1.1 * d * d));
 }
 
 // Piecewise-linear over triangles (each grid cell split along its diagonal): a real mesh.
@@ -92,6 +95,7 @@ float3 Gates(float3 o, float3 d, float tMax, float spread) {
         float halo = exp(-dd / (0.14 + spread)) * 0.45;
         float fade = 1.0 - smoothstep(farDist * 0.35, farDist * 0.9, tg);
         float wave = 1.0 + 2.5 * pulse * exp(-pow(zk - pulseZ, 2.0) * 0.04);   // flashes as the beat passes
+        wave += 5.0 * surge * exp(-pow(zk - shockZ, 2.0) * 0.03);              // and as the surge's wall does
         acc += SideColour(q.x / kGateHalfW) * (core * 1.6 + halo) * fade * gateGlow * wave;
     }
     return acc;
@@ -173,8 +177,16 @@ float3 Sky(float3 rd) {
         float gap = step(stripe, 0.1 + zone * 0.5) * step(v, 0.45);
         col = lerp(col, sun, 1.0 - gap);
     }
+    // The surge: the sun bursts white, and a shockwave rings out across the sky.
+    if (surge > 0.01) {
+        float3 hot = lerp(sunTop, float3(1.0, 1.0, 1.0), 0.5);
+        col += hot * surge * (exp(-max(r - sunRadius, 0.0) * 3.0) * 0.9 + (r < sunRadius ? 0.6 : 0.0));
+        float ring = exp(-pow((r - shockR) / (0.012 + 0.03 * shockR), 2.0)) * saturate(1.0 - shockR / 3.0);
+        float ring2 = exp(-pow((r - shockR * 0.62) / (0.008 + 0.02 * shockR), 2.0)) * saturate(1.0 - shockR / 2.0);
+        col += (hot * ring * 1.6 + lerp(gridA, gridB, 0.5) * ring2 * 0.9) * saturate(surge * 3.0);
+    }
     // Horizon flare: a thin hot line across the sky where the sun meets the land.
-    col += lerp(sunBottom, sunTop, 0.3) * exp(-abs(sy) * 350.0) * exp(-abs(sx) * 1.2) * 0.7;
+    col += lerp(sunBottom, sunTop, 0.3) * exp(-abs(sy) * 350.0) * exp(-abs(sx) * (1.2 - 0.9 * surge)) * (0.7 + 2.0 * surge);
 
     if (sy > -0.003) col = City(sx, sy, col);
     return col;
@@ -248,6 +260,9 @@ float4 main(VSOut i) : SV_Target {
             float width = PixelSize(t) * 1.3 + 0.004;
             float3 side = SideColour(p.x);
             float3 shade;
+            float wallD = p.z - shockZ;                                  // the surge's wall of light
+            float wall = surge * (exp(-wallD * wallD * 0.08) * 3.0 + exp(-max(wallD, 0.0) * 0.15) * step(0.0, wallD) * 0.4);
+            float flare = 1.0 + 0.9 * hit + wall;
 
             if (ax < kRoad) {
                 // Wet road: dark gloss, dashed lanes, neon edges, and reflections of the neon.
@@ -261,14 +276,14 @@ float4 main(VSOut i) : SV_Target {
                 float2 rs = float2(rr.x / rr.z, rr.y / rr.z) - float2(0.0, 0.11);
                 shade += lerp(sunBottom, sunTop, 0.4) * exp(-max(length(rs) - sunRadius, 0.0) * 5.0) * exp(-abs(rs.x) * 4.0) * wet * 0.8;
                 float edgeD = abs(ax - kRoad + 0.06);
-                shade += side * (smoothstep(0.05 + width, 0.02, edgeD) * 1.8 + exp(-edgeD / 0.25) * 0.35) * (1.0 + 1.2 * roadLights);
+                shade += side * (smoothstep(0.05 + width, 0.02, edgeD) * 1.8 + exp(-edgeD / 0.25) * 0.35) * (1.0 + 1.2 * roadLights) * flare;
             } else if (ax < kFlat) {
                 // Flat neon grid: bright squares.
                 float lx = abs(frac(p.x + 0.5) - 0.5), lz = abs(frac(zW + 0.5) - 0.5);
                 float w2 = width + 0.012;   // a touch thicker: these lines should really glow
                 float lines = smoothstep(w2, 0.0, lx) + smoothstep(w2, 0.0, lz) * (1.0 + pulse);
                 float halo = exp(-min(lx, lz) / (w2 * 5.0)) * 0.45;
-                shade = groundCol + side * (lines * 1.8 + halo);
+                shade = groundCol + side * (lines * 1.8 + halo) * flare;
             } else {
                 // Mountains: flat-shaded low-poly facets with glowing wireframe edges.
                 float3 n = FacetNormal(p.x, zW);
@@ -277,7 +292,7 @@ float4 main(VSOut i) : SV_Target {
                 float2 f = float2(frac(p.x), frac(zW));
                 float edgeD = min(min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)), abs(f.x + f.y - 1.0) * 0.7071);
                 float edge = smoothstep(width, 0.0, edgeD) + exp(-edgeD / (width * 3.0)) * 0.25;
-                shade = groundCol * (1.0 + 3.0 * facet) + side * edge * (0.7 + 1.3 * h01);
+                shade = groundCol * (1.0 + 3.0 * facet) + side * edge * (0.7 + 1.3 * h01) * (1.0 + 0.5 * hit + wall);
             }
             // Capped fog: even the farthest ridges stay solid silhouettes in front of the city.
             float fog = smoothstep(farDist * 0.35, kTerrainFar, t) * 0.62;
@@ -299,7 +314,7 @@ float4 main(VSOut i) : SV_Target {
     }
 
     col += Gates(ro, rd, tScene, 0.0);
-    col += lerp(gridA, gridB, 0.5) * flash * 0.3;
+    col += lerp(gridA, gridB, 0.5) * flash * 0.45;
     col *= 0.93 + 0.07 * step(0.5, frac(i.pos.y * 0.5));    // faint scanlines
     float2 v = i.uv - 0.5;
     col *= 1.0 - dot(v, v) * 0.55;                           // vignette

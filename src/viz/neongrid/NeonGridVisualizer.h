@@ -10,7 +10,10 @@
 //   beat (grid)  -> across-lines pulse, a bright ring rushes towards you, gentle camera bob
 //   intensity    -> flight speed
 //   build-up     -> faster, brighter horizon
-//   drop         -> glitch tear + flash, new colour scheme
+//   big hit      -> Surge: the sun bursts (a shockwave rings out across the sky), a wall of light rushes
+//                   in from the horizon lifting the mountains as it passes, the view widens into a
+//                   speed burst, glitch tear + flash, new colour scheme
+//   kicks        -> in big sections, the grid and gates flare with each kick (light only)
 //   drums        -> strobing road lights (calmer drift for drumless music)
 //   treble       -> twinkling stars; bass -> the sun swells
 class NeonGridVisualizer : public IVisualizer {
@@ -67,6 +70,9 @@ private:
     // Motion and response
     float m_time = 0.0f, m_speed = 6.0f, m_bob = 0.0f, m_pulse = 0.0f, m_pulseZ = 100.0f;
     float m_buildUp = 0.0f, m_glitch = 0.0f, m_glitchSeed = 0.0f, m_flash = 0.0f;
+    float m_surge = 0.0f, m_surgeEnv = 0.0f;   // the big hit: decaying, and its eased envelope
+    float m_sinceSurge = 99.0f;                // seconds since it hit (drives the shockwaves)
+    float m_hit = 0.0f, m_hitEnv = 0.0f;       // kicks in big sections
     float m_bass = 0.0f, m_treble = 0.0f, m_drums = 0.0f;
     uint32_t m_lastBeat = 0, m_lastGrid = 0, m_lastDrop = 0;
     int m_beatsSinceChange = 0;

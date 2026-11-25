@@ -25,6 +25,7 @@ struct NeonConstants {   // matches cbuffer Neon in neongrid_ps.hlsl
     float gridA[3];      float bass;
     float gridB[3];      float gateSpacing;
     float ground[3];     float pad;
+    float shockR, shockZ, surge, hit;   // sun shockwave radius; the light wall's distance; envelopes
 };
 static_assert(sizeof(NeonConstants) % 16 == 0);
 static_assert(sizeof(NeonConstants) <= sizeof(float) * 48);
@@ -163,7 +164,15 @@ void NeonGridVisualizer::Update(const AudioFeatures& audio, float dt) {
     const bool gridLocked = audio.tempoConfidence > 0.4f;
     float target = 0.0f;
     if (gridLocked) target = std::pow(1.0f - audio.beatPhase, 4.0f);
-    if (audio.beatCount != m_lastBeat) { m_lastBeat = audio.beatCount; if (!gridLocked) { m_pulse = 1.0f; m_pulseZ = 12.0f; ++m_beatsSinceChange; } }
+    if (audio.beatCount != m_lastBeat) {
+        m_lastBeat = audio.beatCount;
+        if (!gridLocked) { m_pulse = 1.0f; m_pulseZ = 12.0f; ++m_beatsSinceChange; }
+        // Kicks in big sections flare the neon (light only: no camera move).
+        const float big = std::clamp((audio.intensity - 0.45f) / 0.3f, 0.0f, 1.0f);
+        m_hit = std::max(m_hit, big * std::clamp(0.3f + 0.9f * audio.bass, 0.0f, 1.0f));
+    }
+    m_hit *= std::exp(-dt / 0.18f);
+    m_hitEnv = Smooth(m_hitEnv, m_hit, dt, 0.03f, 0.08f);
     if (audio.gridBeat != m_lastGrid) { m_lastGrid = audio.gridBeat; if (gridLocked) { m_pulseZ = 12.0f; ++m_beatsSinceChange; } }
     m_pulse = gridLocked ? target * audio.tempoConfidence : m_pulse * std::exp(-dt / 0.25f);
     m_bob = Smooth(m_bob, m_pulse, dt, 0.12f, 0.5f);   // eased: never a jolt
@@ -174,10 +183,17 @@ void NeonGridVisualizer::Update(const AudioFeatures& audio, float dt) {
         m_lastDrop = audio.dropCount;
         m_glitch = 1.0f;
         m_flash = 1.0f;
+        m_surge = 1.0f;
+        m_sinceSurge = 0.0f;
         m_glitchSeed = std::fmod(m_glitchSeed + 0.618034f, 1.0f);
         if (!m_locked && m_timeSinceChange > 3.0f) NextScheme(0.8f);
     }
     m_glitch *= std::exp(-dt / 0.3f);
+    // The surge holds for a moment, then eases off over a couple of seconds; its envelope rises fast
+    // but not in a single frame, so the view swells open rather than jumping.
+    m_sinceSurge += dt;
+    if (m_sinceSurge > 0.6f) m_surge *= std::exp(-dt / 1.4f);
+    m_surgeEnv = Smooth(m_surgeEnv, m_surge, dt, 0.12f, 0.25f);
     m_flash *= std::exp(-dt / 0.4f);
     if (m_beatsSinceChange >= 32 && m_timeSinceChange > 20.0f) m_changePending = true;
     const bool onDownbeat = audio.barPhase < m_lastBarPhase;
@@ -194,8 +210,9 @@ void NeonGridVisualizer::Update(const AudioFeatures& audio, float dt) {
     const float targetSpeed = audio.silent ? 2.5f : 4.0f + 9.0f * audio.intensity + 8.0f * m_buildUp;
     const float tf = audio.tempoFactor;   // faster songs animate faster
     m_speed = Smooth(m_speed, targetSpeed * tf, dt, 1.0f, 2.0f);
-    m_travel += double(m_speed) * dt;
-    m_pulseZ -= m_speed * dt * 1.5f;   // the beat ring rushes towards the camera
+    const float speed = m_speed * (1.0f + 2.2f * m_surgeEnv);   // the surge's speed burst
+    m_travel += double(speed) * dt;
+    m_pulseZ -= speed * dt * 1.5f;   // the beat ring rushes towards the camera
     while (m_travel >= m_nextRowAt) {
         PushRow();
         m_nextRowAt += kRowSpacing;
@@ -211,22 +228,26 @@ void NeonGridVisualizer::Update(const AudioFeatures& audio, float dt) {
     c.roll = 0.025f * std::sin(m_time * 0.27f);
     c.rowSpacing = kRowSpacing;
     c.farDist = kFarDist;
-    c.maxHeight = 5.0f;
-    c.tanHalfFov = std::tan(32.0f * 3.14159265f / 180.0f);
+    c.maxHeight = 5.0f * (1.0f + 0.35f * m_surgeEnv);
+    c.tanHalfFov = std::tan((32.0f + 12.0f * m_surgeEnv) * 3.14159265f / 180.0f);   // the view widens into the burst
     c.pulse = m_pulse;
     c.buildUp = m_buildUp;
     c.glitch = m_glitch;
     c.glitchSeed = m_glitchSeed;
-    c.sunRadius = 0.34f + 0.03f * m_bass;
-    c.gateGlow = 0.85f + 0.8f * m_buildUp;
+    c.sunRadius = 0.34f + 0.03f * m_bass + 0.05f * m_surgeEnv;
+    c.gateGlow = 0.85f + 0.8f * m_buildUp + 1.4f * m_surgeEnv + 0.7f * m_hitEnv;
     c.bass = m_bass;
     c.gateSpacing = 10.0f;
     c.roadLights = m_drums * (0.4f + 0.6f * m_pulse);
     c.treble = m_treble;
-    c.horizonGlow = 0.5f + 0.9f * m_buildUp + 0.3f * m_bass;
+    c.horizonGlow = 0.5f + 0.9f * m_buildUp + 0.3f * m_bass + 1.6f * m_surgeEnv + 0.3f * m_hitEnv;
     c.flash = m_flash;
     c.sunStripes = 9.0f;
     c.pulseZ = m_pulseZ;
+    c.shockR = m_sinceSurge * 1.6f;                            // screen heights per second
+    c.shockZ = kFarDist * 1.4f - m_sinceSurge * 75.0f;          // from beyond the horizon to past the camera
+    c.surge = m_surgeEnv;
+    c.hit = m_hitEnv;
     Copy3(c.skyTop, s.skyTop);
     Copy3(c.skyHorizon, s.skyHorizon);
     Copy3(c.sunTop, s.sunTop);
