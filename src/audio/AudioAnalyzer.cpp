@@ -10,6 +10,7 @@ constexpr float kRangeDb = 45.0f;      // dynamic range shown below the auto-gai
 constexpr float kFloorDb = -50.0f;     // auto-gain never boosts beyond this (keeps silence dark)
 constexpr float kStructureWarmUp = 4.0f;   // seconds of audio before build-ups/drops are judged
 constexpr float kRhythmMemory = 15.0f;     // how long drums keep structure detection on
+constexpr float kDanceRhythmMemory = 60.0f;   // ...in dance music, whose breakdowns run 30-60 s
 constexpr float kDrumsPresent = 0.36f;     // percussiveness above this = drums are playing
 // Big moments in a big section without a drop: how loud the section must be (drum-driven songs sit at
 // intensity 0.4-0.6, solo piano ~0.25) and how long since the last big moment.
@@ -17,6 +18,16 @@ constexpr float kPeakIntensity = 0.38f;
 constexpr float kPeakGap = 22.0f;          // on a phrase downbeat when the beat grid is locked
 constexpr float kPeakGapNoGrid = 30.0f;
 constexpr int kPeakPhraseBeats = 16;       // a phrase: 4 bars
+constexpr float kDanceOn = 0.4f;           // AudioFeatures::edm above this: dance-music rules for drops
+constexpr float kDancePeakGap = 45.0f;     // ...big moments without a drop come this rarely
+constexpr int kDancePhraseBeats = 32;      // ...on 8-bar phrase boundaries
+// Dance music (AudioFeatures::edm): how alike the four beats of a bar must be (correlation of the
+// kick-range profile), how much the kick range must swing within a beat, and how far the bass must
+// lead the high mids. (Calibrated with tools/analysis: house and techno repeat 0.8+, swing 3.5-20 dB
+// and lead by 0.2-0.6; metal leads by 0.08 at most, even when it kicks on every beat.)
+constexpr float kDanceRepeat = 0.55f;
+constexpr float kDanceDepthDb = 1.5f;
+constexpr float kDanceBassLead = 0.08f;
 
 // Exponential approach with separate rise/fall time constants (seconds); frame-rate independent.
 float Smooth(float current, float target, float dt, float attack, float release) {
@@ -59,6 +70,9 @@ void AudioAnalyzer::ConfigureBands(float sampleRate) {
         const int midi = static_cast<int>(std::lround(12.0f * std::log2(hz / 440.0f) + 69.0f));
         m_binPitch[k] = static_cast<signed char>(((midi % 12) + 12) % 12);
     }
+    // Dance music: the kick's fundamental.
+    m_subLo = std::clamp(int(40.0f / binHz), 1, kBins - 1);
+    m_subHi = std::clamp(int(120.0f / binHz) + 1, m_subLo + 1, kBins);
     // Instruments: snare body and snap, hi-hats, and the vocal range.
     auto band = [&](FluxBand& b, float lo, float hi) {
         b.lo = std::clamp(int(lo / binHz), 1, kBins - 1);
@@ -161,9 +175,6 @@ void AudioAnalyzer::Update(const float* samples, float sampleRate, bool newData,
         m_fluxVar += a * (d * d - m_fluxVar);
     }
 
-    UpdateInstruments(newData, dt);
-    UpdateHarmony(dt);
-
     // --- Beat grid ---
     const BeatTracker::State& grid = m_beats.GetState();
     f.bpm = grid.bpm;
@@ -189,6 +200,11 @@ void AudioAnalyzer::Update(const float* samples, float sampleRate, bool newData,
         f.tempoFactor = Smooth(f.tempoFactor, target, dt, 2.5f, 2.5f);
     }
 
+    // After the grid: dance detection reads it, and the vocal detector removes beat-locked pumping.
+    UpdateDance(dt);
+    UpdateInstruments(newData, dt);
+    UpdateHarmony(dt);
+
     // --- Structure & waveform ---
     double bassP = 0, highP = 0, totalP = 0;
     for (int k = 1; k < m_bassBinHi; ++k) bassP += m_power[k];
@@ -207,6 +223,7 @@ void AudioAnalyzer::UpdateInstruments(bool newData, float dt) {
     if (f.silent) {
         f.vocal = Smooth(f.vocal, 0.0f, dt, 0.1f, 0.5f);
         f.pad = Smooth(f.pad, 0.0f, dt, 0.1f, 0.5f);
+        m_vocalProfileReady = false;
         return;
     }
 
@@ -263,7 +280,19 @@ void AudioAnalyzer::UpdateInstruments(bool newData, float dt) {
     m_vocalPresence = Smooth(m_vocalPresence, std::clamp(float(sum / (total + 1e-14)) * 2.5f, 0.0f, 1.0f), dt, 0.1f, 0.4f);
     // Syllable-rate movement: band-pass the loudness envelope to roughly 3-8 Hz (difference of
     // two smoothers) and measure how much is left. Beats are slower, hi-hats far faster, pads flat.
-    const float db = ToDb(float(sum / n));
+    float db = ToDb(float(sum / n));
+    // Sidechain pumping: dance music ducks everything after each kick, a beat-locked swing of a few
+    // per second, right where syllables sit. Learn the vocal range's loudness at each 1/16 of the beat
+    // and take that shape out, so pumping pads read as pads (voices don't repeat with the beat).
+    if (f.tempoConfidence > 0.4f) {
+        const int bin = std::clamp(int(f.beatPhase * kBeatBins), 0, kBeatBins - 1);
+        if (!m_vocalProfileReady) std::fill(std::begin(m_vocalBeatProfile), std::end(m_vocalBeatProfile), db);
+        m_vocalProfileReady = true;
+        m_vocalBeatProfile[bin] += 0.03f * (db - m_vocalBeatProfile[bin]);   // ~4 bars of memory per step
+        float mean = 0.0f;
+        for (float v : m_vocalBeatProfile) mean += v / kBeatBins;
+        db -= f.edm * (m_vocalBeatProfile[bin] - mean);
+    }
     if (m_vocalFast < -99.0f) m_vocalFast = m_vocalSlow = db;
     m_vocalFast = Smooth(m_vocalFast, db, dt, 0.02f, 0.02f);   // ~8 Hz
     m_vocalSlow = Smooth(m_vocalSlow, db, dt, 0.055f, 0.055f); // ~3 Hz
@@ -273,6 +302,69 @@ void AudioAnalyzer::UpdateInstruments(bool newData, float dt) {
     const float base = m_tonal * m_vocalPresence;
     f.vocal = Smooth(f.vocal, base * pulsing, dt, 0.08f, 0.4f);
     f.pad = Smooth(f.pad, base * (1.0f - pulsing), dt, 0.3f, 0.8f);
+}
+
+// Four-on-the-floor: fold the kick range's loudness over the bar (32 steps). In dance music every
+// beat of the bar looks the same (a kick, then a dip, often deepened by sidechain ducking), so the
+// four quarter-bar profiles match and swing a lot. Rock (kick on 1 and 3, snare on 2 and 4), hip-hop
+// (syncopated kicks) and blast beats (no gap between kicks) fail one test or the other.
+void AudioAnalyzer::UpdateDance(float dt) {
+    AudioFeatures& f = m_features;
+    if (f.silent) {
+        f.edm = 0.0f;
+        m_profileFrames = 0;
+        m_kickRepeat = m_kickDepth = 0.0f;
+        return;
+    }
+    // Hold everything while the grid is unsure, the drums are out or the kick and bass have been
+    // pulled for a moment (breakdowns and build-ups keep the verdict; a snare roll over a riser is
+    // not the groove). Not the gaps between kicks, which deep sidechained grooves dip into.
+    if (f.tempoConfidence < 0.4f || f.percussive < kDrumsPresent || m_bassAbsentTime > 0.5f) return;
+
+    // Mix balance: dance music is bass-led; guitar bands (who can also kick on every beat) fill the
+    // high mids just as much. Average of bass minus high mids (both auto-gained 0..1) over ~6 s.
+    m_bassLead = m_profileFrames == 0 ? f.bass - f.highMid : Smooth(m_bassLead, f.bass - f.highMid, dt, 6.0f, 6.0f);
+
+    double sub = 0.0;
+    for (int k = m_subLo; k < m_subHi; ++k) sub += m_power[k];
+    const float subDb = ToDb(float(sub / (m_subHi - m_subLo)));
+    const int bin = std::clamp(int(f.barPhase * kBarBins), 0, kBarBins - 1);
+    if (m_profileFrames == 0) std::fill(std::begin(m_subProfile), std::end(m_subProfile), subDb);
+    m_subProfile[bin] += 0.06f * (subDb - m_subProfile[bin]);   // ~4 bars of memory per step
+    ++m_profileFrames;
+
+    float repeat = 0.0f, depth = 0.0f;
+    constexpr int kQ = kBarBins / 4;
+    float centered[4][kQ];
+    for (int q = 0; q < 4; ++q) {
+        float mean = 0.0f, lo = 1e9f, hi = -1e9f;
+        for (int i = 0; i < kQ; ++i) {
+            const float v = m_subProfile[q * kQ + i];
+            mean += v; lo = std::min(lo, v); hi = std::max(hi, v);
+        }
+        mean /= kQ;
+        for (int i = 0; i < kQ; ++i) centered[q][i] = m_subProfile[q * kQ + i] - mean;
+        depth += (hi - lo) * 0.25f;
+    }
+    for (int a = 0; a < 4; ++a) {
+        for (int b = a + 1; b < 4; ++b) {
+            float sxy = 0, sxx = 0, syy = 0;
+            for (int i = 0; i < kQ; ++i) {
+                sxy += centered[a][i] * centered[b][i];
+                sxx += centered[a][i] * centered[a][i];
+                syy += centered[b][i] * centered[b][i];
+            }
+            repeat += sxy / std::sqrt(sxx * syy + 1e-9f) / 6.0f;
+        }
+    }
+    m_kickRepeat = repeat;
+    m_kickDepth = depth;
+    // Trust the profile only after a few bars of locked, drum-driven audio (~4 s).
+    if (m_profileFrames < 300) return;
+    const float target = std::clamp((repeat - kDanceRepeat) / 0.2f, 0.0f, 1.0f) *
+                         std::clamp((depth - kDanceDepthDb) / 3.0f, 0.0f, 1.0f) *
+                         std::clamp((m_bassLead - kDanceBassLead) / 0.15f, 0.0f, 1.0f);
+    f.edm = Smooth(f.edm, target, dt, 3.0f, 8.0f);
 }
 
 // Key (Krumhansl-Kessler key profiles against a ~10 s chroma average), chords (major/minor triads
@@ -366,7 +458,8 @@ void AudioAnalyzer::UpdateHarmony(float dt) {
     }
 
     // Mood: major/minor (as far as we're sure), tempo, how big the section is and how bright it sounds.
-    const float majorness = (f.minorKey ? -1.0f : 1.0f) * f.keyConfidence;
+    // Most dance music is in a minor key however euphoric it is, so there the key counts for less.
+    const float majorness = (f.minorKey ? -1.0f : 1.0f) * f.keyConfidence * (1.0f - 0.6f * f.edm);
     const float target = std::clamp(1.6f * (0.45f * majorness + 0.9f * (f.tempoFactor - 1.0f) + 0.6f * (f.intensity - 0.45f) + 0.4f * (m_brightness - 0.5f)),
                                     -1.0f, 1.0f);
     f.mood = Smooth(f.mood, target, dt, 3.0f, 3.0f);
@@ -460,7 +553,11 @@ void AudioAnalyzer::UpdateStructure(float bassPower, float highPower, float tota
     }
 
     m_bassShort = Smooth(m_bassShort, bassDb, dt, 0.08f, 0.15f);
-    m_bassRef = Smooth(m_bassRef, m_bassShort, dt, 0.5f, 20.0f);   // the song's usual bass level
+    // The song's usual bass level. In dance music, hold it while the bass is pulled out for a
+    // breakdown (they run 30-60 s): otherwise it sinks towards the breakdown's level, the riser's
+    // rumble reads as the bass coming back, and the drop fires early.
+    const bool holdBassRef = f.edm > kDanceOn && m_bassShort < m_bassRef - 7.5f;
+    if (!holdBassRef) m_bassRef = Smooth(m_bassRef, m_bassShort, dt, 0.5f, 20.0f);
     m_highShort = Smooth(m_highShort, highDb, dt, 0.3f, 0.3f);
     m_levelFast = Smooth(m_levelFast, levelDb, dt, 0.05f, 0.1f);
     m_levelSlow = Smooth(m_levelSlow, levelDb, dt, 2.0f, 2.0f);
@@ -492,7 +589,9 @@ void AudioAnalyzer::UpdateStructure(float bassPower, float highPower, float tota
     // comfortably covers a beatless breakdown before a drop, but keeps piano crescendos and
     // ambient swells from reading as builds and drops. (Calibrated with tools/analysis:
     // drum-driven songs sit at 0.38-0.60, solo piano at <= 0.28.)
-    m_rhythmHold = f.percussive > kDrumsPresent ? kRhythmMemory : std::max(0.0f, m_rhythmHold - dt);
+    // Dance music's breakdowns run far longer, so there the memory stretches to a minute.
+    m_rhythmHold = f.percussive > kDrumsPresent ? kRhythmMemory + (kDanceRhythmMemory - kRhythmMemory) * f.edm
+                                                : std::max(0.0f, m_rhythmHold - dt);
 
     // Warm-up: the first seconds of a song (often a fade-in) would otherwise read as a
     // rising build followed by a jump. Let the baselines settle before judging structure.
@@ -509,16 +608,22 @@ void AudioAnalyzer::UpdateStructure(float bassPower, float highPower, float tota
     m_buildPeak = std::max(m_buildPeak, f.buildUp);
     const bool released = m_buildPeak > 0.4f && f.buildUp < 0.15f && m_levelFast > m_levelSlow - 3.0f;
     if (m_buildPeak > 0.0f && f.buildUp < 0.05f && !released) m_buildPeak = 0.0f;
-    // A big section that hasn't had a big moment for a while: the start of the next phrase (4 bars
-    // since the last one, on the downbeat), or after a while without a beat grid.
     m_sinceHit += dt;
     const bool gridLocked = f.tempoConfidence > 0.4f;
-    if (f.gridBeat != m_lastGridBeat) { m_lastGridBeat = f.gridBeat; if (gridLocked) ++m_phraseBeats; }
+    bool gridBeat = false;
+    if (f.gridBeat != m_lastGridBeat) { m_lastGridBeat = f.gridBeat; if (gridLocked) { ++m_phraseBeats; gridBeat = true; } }
     const bool onDownbeat = f.barPhase < m_lastBarPhase;
     m_lastBarPhase = f.barPhase;
+    const bool dance = f.edm > kDanceOn;
+    // A big section that hasn't had a big moment for a while: the start of the next phrase (4 bars
+    // since the last one, on the downbeat), or after a while without a beat grid. Dance music is built
+    // in 8-bar phrases counted from the last drop, and its big moments belong to the drops, so there
+    // it waits longer and lands exactly 8, 16, 24... bars after the last one.
+    const bool phraseStart = dance ? gridBeat && m_phraseBeats > 0 && m_phraseBeats % kDancePhraseBeats == 0
+                                   : onDownbeat && m_phraseBeats >= kPeakPhraseBeats;
     // (Not during a build-up: that saves the moment for the drop.)
     const bool peak = f.intensity > kPeakIntensity && f.buildUp < 0.2f &&
-                      (gridLocked ? onDownbeat && m_phraseBeats >= kPeakPhraseBeats && m_sinceHit > kPeakGap : m_sinceHit > kPeakGapNoGrid);
+                      (gridLocked ? phraseStart && m_sinceHit > (dance ? kDancePeakGap : kPeakGap) : m_sinceHit > kPeakGapNoGrid);
     if (warmedUp && (bassReturn || levelJump || released || peak) && m_dropCooldown <= 0.0f) {
         f.drop = 1.0f;
         ++f.dropCount;
@@ -526,7 +631,8 @@ void AudioAnalyzer::UpdateStructure(float bassPower, float highPower, float tota
         m_dropCooldown = 6.0f;
         m_sinceHit = 0.0f;
         m_buildPeak = 0.0f;
-        m_phraseBeats = 0;
+        // The phrase starts on the beat nearest the drop: if that beat is still to come, don't count it.
+        m_phraseBeats = f.beatPhase > 0.5f ? -1 : 0;
     }
     m_lastBassAbsent = m_bassAbsentTime;
 }

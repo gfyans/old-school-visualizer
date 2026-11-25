@@ -40,6 +40,11 @@ struct AudioFeatures {
     // 1.25 at 155 (clamped 0.7..1.4). Glides when the tempo changes, holds through beatless
     // breaks, and eases back to 1 in silence. Multiply animation rates by it.
     float tempoFactor = 1;
+    // 0..1: how much this is four-on-the-floor dance music (house, techno, trance, EDM): a kick on
+    // every beat, each beat of the bar alike, on a steady grid. Builds over ~4 s, holds through
+    // beatless breakdowns, resets in silence. When high, the analyzer expects long breakdowns,
+    // drops landing on the beat and 8-bar phrases.
+    float edm = 0;
 
     // --- Harmony and mood ---
     int key = 0;                // 0..11 = C, C#, D ... B (the song's key, from the last ~10 s)

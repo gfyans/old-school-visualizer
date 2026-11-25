@@ -25,6 +25,8 @@ public:
 
     const AudioFeatures& Features() const { return m_features; }
     const BeatTracker::State& TrackerState() const { return m_beats.GetState(); }   // diagnostics
+    float KickRepeat() const { return m_kickRepeat; }   // diagnostics: how alike the 4 beats of a bar are (sub-bass)
+    float KickDepth() const { return m_kickDepth; }     // diagnostics: sub-bass swing within a beat, dB
 
 private:
     static constexpr int kBins = kFftSize / 2;
@@ -35,6 +37,7 @@ private:
     void UpdateStructure(float bassPower, float highPower, float totalPower, float dt);
     void UpdateInstruments(bool newData, float dt);
     void UpdateHarmony(float dt);
+    void UpdateDance(float dt);
 
     Fft m_fftEngine{ kFftSize };
     float m_window[kFftSize];
@@ -67,6 +70,15 @@ private:
     float m_brightness = 0;
     float m_sinceSnare = 1, m_sinceHat = 1;
     float m_vocalFast = -100, m_vocalSlow = -100, m_vocalMod = 0, m_tonal = 0, m_vocalPresence = 0;
+
+    // Dance music (four-on-the-floor): the sub-bass and vocal-range loudness folded over the beat grid.
+    static constexpr int kBarBins = 32, kBeatBins = 16;
+    int m_subLo = 1, m_subHi = 2;
+    float m_subProfile[kBarBins] = {};    // dB of the kick range at each 1/32 of the bar
+    float m_vocalBeatProfile[kBeatBins] = {};   // dB of the vocal range at each 1/16 of the beat (sidechain pumping)
+    int m_profileFrames = 0;
+    bool m_vocalProfileReady = false;
+    float m_kickRepeat = 0, m_kickDepth = 0, m_bassLead = 0;
 
     // Adaptive state
     float m_referenceDb = -50.0f;

@@ -160,7 +160,7 @@ void Overlay::DrawStats(ID2D1DeviceContext* ctx, const OverlayStats& s, const Au
         s.sampleRate, a.silent ? L"  (silent)" : L"", a.beatCount,
         tempo, a.buildUp, a.dropCount);
 
-    const D2D1_RECT_F panel = D2D1::RectF(24, 24, 24 + 560, 24 + 355 + 88);
+    const D2D1_RECT_F panel = D2D1::RectF(24, 24, 24 + 560, 24 + 355 + 110);
     m_brush->SetColor(D2D1::ColorF(0, 0, 0, 0.55f));
     ctx->FillRoundedRectangle(D2D1::RoundedRect(panel, 8, 8), m_brush.Get());
     DrawText(ctx, buf, m_monoFormat.Get(), D2D1::RectF(panel.left + 16, panel.top + 12, panel.right - 16, panel.bottom), 1.0f);
@@ -178,6 +178,7 @@ void Overlay::DrawStats(ID2D1DeviceContext* ctx, const OverlayStats& s, const Au
         { L"hat", a.hat, D2D1::ColorF(0.9f, 1.0f, 0.6f) },
         { L"vocal", a.vocal, D2D1::ColorF(1.0f, 0.85f, 0.6f) },
         { L"pad", a.pad, D2D1::ColorF(0.5f, 0.8f, 0.9f) },
+        { L"dance", a.edm, D2D1::ColorF(1.0f, 0.3f, 0.9f) },      // four-on-the-floor score
     };
     float y = panel.top + 215;
     for (const Meter& m : meters) {

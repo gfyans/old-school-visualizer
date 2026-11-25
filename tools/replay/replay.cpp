@@ -77,7 +77,7 @@ int wmain(int argc, wchar_t** argv) {
     std::wstring csvPath = argc > 2 ? argv[2] : std::wstring(argv[1]) + L".csv";
     FILE* csv = nullptr;
     if (_wfopen_s(&csv, csvPath.c_str(), L"w") != 0 || !csv) return 1;
-    std::fprintf(csv, "t,level,bass,lowmid,highmid,treble,intensity,silent,onset_beat,bpm,confidence,beat_phase,grid_beat,build_up,drop,periodicity,contrast,phase_error,percussive\n");
+    std::fprintf(csv, "t,level,bass,lowmid,highmid,treble,intensity,silent,onset_beat,bpm,confidence,beat_phase,grid_beat,build_up,drop,periodicity,contrast,phase_error,percussive,edm,kick_repeat,kick_depth,vocal,pad\n");
 
     constexpr float kFps = 72.0f;
     const size_t hop = static_cast<size_t>(rate / kFps);
@@ -88,7 +88,7 @@ int wmain(int argc, wchar_t** argv) {
     uint32_t lastBeat = 0, lastGrid = 0, lastDrop = 0;
     std::vector<float> dropTimes, bpms, confs;
     size_t onsetBeats = 0, gridBeats = 0;
-    float vocalSum = 0.0f, padSum = 0.0f, factorLast = 1.0f, moodSum = 0.0f;
+    float vocalSum = 0.0f, padSum = 0.0f, factorLast = 1.0f, moodSum = 0.0f, edmSum = 0.0f, edmMax = 0.0f;
     int moodCount = 0;
     int audible = 0;
     float peakBuild = 0.0f, peakBuildAt = 0.0f;
@@ -111,13 +111,15 @@ int wmain(int argc, wchar_t** argv) {
         if (t > 10.0f && f.bpm > 0.0f) { bpms.push_back(f.bpm); confs.push_back(f.tempoConfidence); }
         if (!f.silent) { vocalSum += f.vocal; padSum += f.pad; ++audible; }
         factorLast = f.tempoFactor;
-        if (!f.silent && t > 10.0f) { moodSum += f.mood; ++moodCount; }
+        if (!f.silent && t > 10.0f) { moodSum += f.mood; edmSum += f.edm; ++moodCount; }
+        edmMax = std::max(edmMax, f.edm);
 
         const BeatTracker::State& diag = analyzer->TrackerState();
-        std::fprintf(csv, "%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%.2f,%.3f,%.3f,%d,%.3f,%d,%.3f,%.3f,%.3f,%.3f\n",
+        std::fprintf(csv, "%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%.2f,%.3f,%.3f,%d,%.3f,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.3f,%.3f\n",
             t, f.level, f.bass, f.lowMid, f.highMid, f.treble, f.intensity, f.silent ? 1 : 0, onset ? 1 : 0,
             f.bpm, f.tempoConfidence, f.beatPhase, grid ? 1 : 0, f.buildUp, drop ? 1 : 0,
-            diag.periodicity, diag.contrast, diag.phaseError, diag.percussive);
+            diag.periodicity, diag.contrast, diag.phaseError, diag.percussive,
+            f.edm, analyzer->KickRepeat(), analyzer->KickDepth(), f.vocal, f.pad);
     }
     fclose(csv);
 
@@ -138,5 +140,6 @@ int wmain(int argc, wchar_t** argv) {
     std::printf("  harmony: key %s %s (confidence %.2f), chord changes %.0f/min | mood %+.2f (average after 10 s)\n",
         kNames[last.key], last.minorKey ? "minor" : "major", last.keyConfidence, last.chordCount * 60.0f / duration,
         moodCount ? moodSum / moodCount : 0.0f);
+    std::printf("  dance (four-on-the-floor): average %.2f after 10 s, peak %.2f\n", moodCount ? edmSum / moodCount : 0.0f, edmMax);
     return 0;
 }

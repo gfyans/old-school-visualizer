@@ -325,6 +325,76 @@ int main() {
         Check(!dropTimes.empty() && dropTimes[0] >= 20.0f && dropTimes[0] < 20.7f, "drop detected within 0.7 s");
     }
 
+    std::printf("Dance track: groove, 32 s beatless breakdown (riser in the last 8 s), drop at 62 s\n");
+    {
+        // House at 124 BPM: kick on every beat, sub bass, off-beat hats. The breakdown drops all drums
+        // and bass for a pad, the length real breakdowns run; the old 15 s drum memory forgot the
+        // drums halfway through and missed the drop.
+        std::mt19937 rng(11);
+        const float period = 60.0f / 124.0f;
+        auto track = [&](float t) {
+            const float noise = std::uniform_real_distribution<float>(-1.0f, 1.0f)(rng);
+            const float pad = 0.1f * (std::sin(2 * kPi * 220.0f * t) + std::sin(2 * kPi * 277.2f * t) + std::sin(2 * kPi * 329.6f * t));
+            if (t < 30.0f || t >= 62.0f) {
+                const float since = std::fmod(t, period);
+                const float bass = 0.35f * std::sin(2.0f * kPi * 55.0f * t) * std::fmin(1.0f, since / 0.1f);   // ducked under the kick
+                const float hat = noise * 0.15f * std::exp(-std::fmod(t + period / 2, period) * 60.0f);
+                return 0.5f * (0.8f * Kick(since) + bass + hat + 0.4f * pad);
+            }
+            if (t < 54.0f) return 0.5f * pad;
+            const float progress = (t - 54.0f) / 8.0f;
+            const float riser = noise * 0.02f * std::pow(30.0f, progress);
+            const float rollPeriod = period / (progress < 0.5f ? 2.0f : progress < 0.75f ? 4.0f : 8.0f);
+            const float snare = noise * 0.25f * std::exp(-std::fmod(t, rollPeriod) * 40.0f);
+            return 0.5f * (0.5f * pad + riser + snare);
+        };
+        float edmAt28 = 0.0f, edmMinBreakdown = 1.0f;
+        std::vector<float> dropTimes;
+        uint32_t lastDrops = 0;
+        Run(70.0f, track, [&](float t, const AudioFeatures& f) {
+            if (std::fabs(t - 28.0f) < 0.01f) edmAt28 = f.edm;
+            if (t > 30.0f && t < 62.0f) edmMinBreakdown = std::fmin(edmMinBreakdown, f.edm);
+            if (f.dropCount != lastDrops) { dropTimes.push_back(t); lastDrops = f.dropCount; }
+        });
+        std::printf("    dance %.2f at 28 s, lowest in breakdown %.2f; drops at:", edmAt28, edmMinBreakdown);
+        for (float t : dropTimes) std::printf(" %.2fs", t);
+        std::printf("\n");
+        Check(edmAt28 > 0.6f, "four-on-the-floor groove reads as dance music");
+        Check(edmMinBreakdown > 0.5f, "dance verdict held through the breakdown");
+        const bool dropOnTime = std::any_of(dropTimes.begin(), dropTimes.end(), [](float t) { return t >= 62.0f && t < 62.7f; });
+        const bool quietBreakdown = std::none_of(dropTimes.begin(), dropTimes.end(), [](float t) { return t > 30.5f && t < 62.0f; });
+        Check(dropOnTime, "drop after a 32 s breakdown detected within 0.7 s");
+        Check(quietBreakdown, "no big moments during the breakdown");
+    }
+
+    std::printf("Rock beat: kick on 1 and 3, snare on 2 and 4, guitars\n");
+    {
+        // A steady rock groove must not read as dance music, even with a locked grid.
+        std::mt19937 rng(12);
+        const float period = 60.0f / 120.0f;
+        float confSum = 0.0f, maxEdm = 0.0f;
+        int confFrames = 0;
+        Run(20.0f, [&](float t) {
+            const float noise = std::uniform_real_distribution<float>(-1.0f, 1.0f)(rng);
+            const int beat = int(t / period) % 4;
+            const float since = std::fmod(t, period);
+            const float kick = (beat == 0 || beat == 2) ? Kick(since) : 0.0f;
+            const float snare = (beat == 1 || beat == 3) ? noise * 0.5f * std::exp(-since * 25.0f) + 0.3f * std::sin(2 * kPi * 200.0f * since) * std::exp(-since * 30.0f) : 0.0f;
+            // Distorted power-chord chugs: a clipped saw-ish tone rich in high mids.
+            float g = 0.0f;
+            for (int h = 1; h < 30; ++h) g += std::sin(2 * kPi * 110.0f * h * t) / h;
+            const float guitar = 0.15f * std::tanh(3.0f * g) * std::exp(-std::fmod(t, period / 2) * 6.0f);   // palm-muted eighths
+            const float hat = noise * 0.15f * std::exp(-std::fmod(t + period / 2, period) * 60.0f);
+            return 0.5f * (0.8f * kick + snare + hat + guitar);
+        }, [&](float t, const AudioFeatures& f) {
+            if (t > 10.0f) { confSum += f.tempoConfidence; ++confFrames; maxEdm = std::fmax(maxEdm, f.edm); }
+        });
+        const float avgConf = confSum / std::max(confFrames, 1);
+        std::printf("    dance at most %.2f, average tempo confidence %.2f (after 10 s)\n", maxEdm, avgConf);
+        Check(avgConf > 0.6f, "rock beat locks the grid (so the dance test means something)");
+        Check(maxEdm < 0.2f, "rock beat does not read as dance music");
+    }
+
     std::printf("Song starting from silence with a fade-in\n");
     {
         // 2 s silence, 3 s fade-in, then a steady groove: none of this is a drop or a build-up.
