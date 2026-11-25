@@ -1,7 +1,8 @@
 # Visualizer
 
 A modern take on the old Winamp visualisers. It listens to whatever your PC is playing (Spotify, a browser, a game)
-and reacts to it: it follows the beat, spots build-ups and drops, and picks colours from the album art.
+and reacts to it: it follows the beat, spots build-ups and drops, and picks colours from the album art. Every scene
+renders at your screen's full resolution when your graphics card can keep up.
 
 It's one small `.exe`. There's no installer, and it keeps itself up to date.
 
@@ -9,9 +10,10 @@ It's one small `.exe`. There's no installer, and it keeps itself up to date.
 
 | | |
 |---|---|
+| ![Glass City](docs/screenshots/glass-city.jpg) | ![Dot Field](docs/screenshots/dot-field.jpg) |
 | ![Neon Grid](docs/screenshots/neon-grid.jpg) | ![Aurora](docs/screenshots/aurora.jpg) |
 | ![Detonation](docs/screenshots/detonation.jpg) | ![Signal](docs/screenshots/signal.jpg) |
-| ![Galaxy](docs/screenshots/galaxy.jpg) | ![Liquid](docs/screenshots/liquid.jpg) |
+| ![Galaxy](docs/screenshots/galaxy.jpg) | ![Fractal flights](docs/screenshots/fractal-flights.jpg) |
 
 ## Visualisers
 
@@ -27,6 +29,12 @@ It's one small `.exe`. There's no installer, and it keeps itself up to date.
 * **Glass City**: a flight through cyberspace, a city of glass with currents of light running through it.
 * **Spectrum**: a classic spectrum analyser.
 * **Dot Field**: 400,000 neon dots on a plane, rising into a landscape made from the music.
+
+### Sharp at any size
+
+Each visualiser finds the sharpest resolution your graphics card can keep up with, and remembers it for next time.
+On a modern card most of them render every pixel, even at 1440p. If it ever has to drop the resolution, it does so
+gradually, and big moments don't push it down. Press `F1` to see the resolution it's rendering at.
 
 ## Using it
 
