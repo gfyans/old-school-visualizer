@@ -293,7 +293,6 @@ float4 main(VSOut i) : SV_Target {
 
     float3 col = 0;
     float edge = 9.0;       // ink: distance to a drawn line, in pixels
-    float inkFill = -1.0;   // ink: forced paper (0) or ink (1), else from the tone
     float inkTone = -1.0;   // ink: the surface's own screentone darkness (else from the light)
     float footprint = h.t * pixelSize;   // world size of this pixel
     if (h.kind == 0) {
@@ -309,7 +308,10 @@ float4 main(VSOut i) : SV_Target {
         float rimGlow = pow(1.0 - facing, 3.0 - 1.2 * pulse);
         float3 voidCol = L.hot * rimGlow * (3.0 + 4.0 * pulse) + L.hot * 0.02;
         col = lerp(voidCol, white, domeWhite);
-        inkFill = domeWhite > 0.5 ? 0.0 : (rimGlow > 0.55 ? 0.0 : 1.0);
+        // Ink: the inversion darkens through the greys rather than flipping (faint bands while it's white);
+        // the burning rim stays light.
+        float dark = smoothstep(0.0, 1.0, 1.0 - domeWhite);
+        inkTone = lerp((1.0 - bands) * 0.5, 1.0, dark) * (1.0 - smoothstep(0.3, 0.8, rimGlow) * dark);
         edge = abs(facing - 0.08) / max(fwidth(facing), 1e-4);
     } else {
         // City surfaces.
@@ -384,7 +386,6 @@ float4 main(VSOut i) : SV_Target {
             if (r < ruinR * (1.0 - regrow)) inkTone = 0.8;
         } else if (h.kind == 4) {
             emit = lerp(L.cool, float3(1, 1, 1), 0.5) * (1.5 + 4.0 * charge);
-            inkFill = 0.0;
         }
         // Lighting: dim moonlight and sky, the orb, and the blast.
         float3 moonDir = normalize(float3(-0.4, 0.7, 0.3));
@@ -433,32 +434,46 @@ float4 main(VSOut i) : SV_Target {
 
     // Looks.
     if (lk == 1) {
-        // Ink: tone from the night's light (inverted: dark areas get dots), lines where faces meet.
+        // Ink: tone from the night's light (inverted: dark areas get dots), lines where faces meet. Under the
+        // dots, a grey ink wash in a few flat steps; with distance everything fades towards the paper, so the
+        // city recedes. One spot colour (red) prints where the blast burns.
+        float hotness = h.kind == 0 && domeOn < 0.01 ? 0.0 : saturate((col.r - 1.8 * col.g - 0.08) * 1.8);   // deep red only, not the orange windows
         float lum = dot(col, float3(0.3, 0.55, 0.15));
         float tone = 1.0 - saturate(1.0 - exp(-lum * 3.0));
-        if (inkTone >= 0.0) {
+        float depth = lerp(1.0, 0.3, fog);   // how strongly this is drawn: faint far away
+        if (h.kind == 5) {
+            tone = inkTone * lerp(1.0, 0.6, fog);
+            depth = lerp(1.0, 0.7, fog);
+        } else if (inkTone >= 0.0) {
             // Surfaces keep their own tone, washed out by the blast's light and by distance.
             float3 bl = BlastLight(p, h.n, L.hot) + flash * 2.0;
             tone = inkTone * saturate(1.0 - dot(bl, 0.4)) * lerp(1.0, 0.35, fog);
         }
-        if (h.kind == 0) tone = 0.08 + 0.25 * saturate(1.0 - rd.y * 2.0);   // pale sky
+        if (h.kind == 0) { tone = 0.08 + 0.25 * saturate(1.0 - rd.y * 2.0); depth = 1.0; }   // pale sky
         if (tCloud < h.t) tone = lerp(tone, 0.1 + 0.3 * cl.a, cl.a);   // clouds stay light: contours do the work
-        float ink = Screentone(tone * 0.9, px);
-        if (inkFill >= 0.0) ink = inkFill;
-        ink = max(ink, step(edge, 1.1));
-        if (tCloud < h.t && cl.a > 0.05) {   // cloud contours
+        tone = saturate(tone);
+        float wash = floor(tone * 4.0 + 0.35) / 4.0 * 0.42;                          // flat grey wash
+        // Tone over the wash; light tones are left to the wash (pixel-sized dots read as scan lines).
+        float st = saturate((tone - 0.2) * 1.15);
+        float dots = Screentone(st, px) * 0.85 * smoothstep(0.12, 0.2, st);
+        float solid = smoothstep(0.75, 0.95, tone);                                  // the darkest go solid
+        float ink = max(max(wash, dots), solid) * depth;
+        ink = max(ink, step(edge, 1.1) * depth);
+        if (tCloud < h.t && cl.a > 0.05) {   // cloud contours, fainter as the deck recedes
             float iso = frac(cl.a * 5.0);
-            ink = max(ink, step(abs(iso - 0.5), 0.5 * fwidth(cl.a * 5.0) * 1.2) * 1.0);
+            float cfade = exp(-tCloud * 0.006);
+            ink = max(ink, step(abs(iso - 0.5), 0.5 * fwidth(cl.a * 5.0) * 1.2) * (0.35 + 0.65 * cfade));
         }
         // Speed lines round a white-hot dome.
         if (domeOn * domeWhite > 0.3 && h.kind == 0) {
             float a = atan2(dot(rd, camUp), dot(rd, camRight));
             float lines = step(0.92, Hash1(int2(floor(a * 90.0), 0), 61));
-            ink = max(ink, lines * step(0.0, rd.y) * domeWhite);
+            ink = max(ink, lines * step(0.0, rd.y) * domeWhite * 0.8);
         }
         float3 paper = float3(0.94, 0.92, 0.86);
+        float3 spot = float3(0.88, 0.24, 0.14);
         float3 inkCol = float3(0.05, 0.05, 0.07);
-        col = lerp(paper, inkCol, ink);
+        col = lerp(lerp(paper, spot, hotness * 0.85), inkCol, ink * (1.0 - 0.5 * hotness));
         col += flash * 0.25;
     } else if (lk == 2) {
         // Dusk: a painted feel: soft posterised light and canvas grain.

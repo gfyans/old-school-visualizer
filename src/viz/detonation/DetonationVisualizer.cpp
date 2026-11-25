@@ -86,10 +86,10 @@ void DetonationVisualizer::ReleaseResources() {
 
 void DetonationVisualizer::Detonate() {
     // A drop while a blast is still going (white dome, void or collapse) erupts again from where the dome
-    // is, bigger, with a fresh shockwave.
+    // is, a little bigger, with a fresh shockwave (capped, so hard songs don't swallow the frame).
     const bool again = m_phase != Phase::Calm;
     m_domeStart = again ? m_domeR : 0.0f;
-    m_domeMax = again ? std::min(m_domeMax + 8.0f, 46.0f) : 30.0f;
+    m_domeMax = again ? std::min(m_domeMax + 4.0f, 38.0f) : 30.0f;
     m_phase = Phase::Blast;
     m_phaseTime = 0.0f;
     m_domeWhite = 1.0f;
@@ -115,11 +115,11 @@ void DetonationVisualizer::Cut(int shot) {
 }
 
 void DetonationVisualizer::PickShot() {
-    // Down the avenue only while there's no dome to fly into.
+    // Down the avenue, or overhead, only while there's no dome to fly into.
     const bool domeUp = m_phase != Phase::Calm;
     int next;
     do next = std::uniform_int_distribution<int>(0, kShotCount - 1)(m_rng);
-    while (next == m_shot || (domeUp && next == Avenue));
+    while (next == m_shot || (domeUp && (next == Avenue || next == Overhead)));
     Cut(next);
 }
 
@@ -217,8 +217,8 @@ void DetonationVisualizer::Update(const AudioFeatures& audio, float dt) {
     if (m_cloudRing > 240.0f) m_cloudRing = 0.0f;
     if (m_shockR > 220.0f) m_shockR = 0.0f;
     if (m_phase == Phase::Calm && m_ruinR > 0.0f && m_regrow >= 1.0f) m_ruinR = 0.0f;
-    // The orbit eases back to keep the dome in frame.
-    m_pullBack = Smooth(m_pullBack, m_phase == Phase::Calm ? 0.0f : 18.0f, dt, 2.0f, 4.0f);
+    // The orbit (and the witness) ease back to keep the dome in frame, further for a bigger one.
+    m_pullBack = Smooth(m_pullBack, m_phase == Phase::Calm ? 0.0f : std::max(18.0f, m_domeMax * 2.4f - 42.0f), dt, 2.0f, 4.0f);
     m_swirl += dt * tf * (0.03f + 0.5f * m_charge * m_charge + (m_phase == Phase::Blast ? 0.15f : 0.0f));
 
     // The director: cut on phrases (8 bars, on the downbeat; 4 when the song is big), or after a while
@@ -230,7 +230,7 @@ void DetonationVisualizer::Update(const AudioFeatures& audio, float dt) {
         ((m_beatsInShot >= phraseLen && onDownbeat && m_shotTime > (big ? 6.0f : 10.0f)) ||
          (!gridLocked && m_shotTime > (big ? 12.0f : 20.0f)) || m_shotTime > 40.0f))
         PickShot();
-    if (!m_locked && m_shot == Avenue && m_phase != Phase::Calm) PickShot();
+    if (!m_locked && (m_shot == Avenue || m_shot == Overhead) && m_phase != Phase::Calm) PickShot();
 
     DetonationConstants c{};
     float cam[12];
@@ -310,7 +310,7 @@ void DetonationVisualizer::Camera(float out[12]) const {
         break;
     }
     default: {   // Witness: far out, above the low suburbs, slowly pushing in
-        const float dist = 95.0f - std::min(s, 40.0f) * 0.6f;
+        const float dist = std::max(95.0f - std::min(s, 40.0f) * 0.6f, (42.0f + m_pullBack) * 1.35f);
         pos = { std::cos(a) * dist, 9.0f, std::sin(a) * dist };
         target = { 0.0f, 9.0f + domeLift * 0.8f, 0.0f };
         break;
