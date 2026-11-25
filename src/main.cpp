@@ -146,6 +146,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     filters.Select(filters.FindByName(settings.filter));
     if (const int saved = host.FindByName(settings.visualizer); saved > 0) host.Select(saved, false);
     else host.Active().Activate();
+    host.RestoreScales(settings.renderScales);
 
     auto capture = std::make_unique<AudioCapture>();
     auto analyzer = std::make_unique<AudioAnalyzer>();
@@ -331,6 +332,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         settings.filter = filters.CurrentName();
         settings.displayMode = displayMode;
         settings.monitor = fullscreenMonitor;
+        settings.renderScales = host.LearnedScales();
         settings.Save();
     };
     window.onClose = saveSettings;   // while the window still exists

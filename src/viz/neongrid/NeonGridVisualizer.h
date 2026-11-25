@@ -23,7 +23,7 @@ public:
     const wchar_t* Name() const override { return L"Neon Grid"; }
     bool CreateResources(ID3D11Device* device) override;
     void ReleaseResources() override;
-    float RenderScale() const override { return 0.75f; }   // thin lines want resolution
+    float RenderScale() const override { return 1.0f; }   // thin lines want resolution
     void Update(const AudioFeatures& audio, float dt) override;
     void Render(Renderer& renderer, float time, float dt) override;
     bool OnKey(UINT vk) override;

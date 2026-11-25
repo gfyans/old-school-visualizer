@@ -2,10 +2,12 @@
 
 #include <shlobj.h>
 #include <algorithm>
+#include <cmath>
 #include <cwchar>
 
 namespace {
 constexpr wchar_t kSection[] = L"Visualizer";
+constexpr wchar_t kScaleSection[] = L"RenderScale";
 
 std::wstring ReadString(const std::wstring& file, const wchar_t* key) {
     wchar_t buf[1024] = {};
@@ -68,6 +70,17 @@ void Settings::Load() {
     }
     autoUpdate = ReadInt(file, L"AutoUpdate", 1) != 0;
     lastUpdateCheck = _wtoi64(ReadString(file, L"LastUpdateCheck").c_str());
+
+    // [RenderScale]: "Name=percent" lines, double-null terminated.
+    std::wstring section(8192, L'\0');
+    const DWORD n = GetPrivateProfileSectionW(kScaleSection, section.data(), static_cast<DWORD>(section.size()), file.c_str());
+    for (const wchar_t* p = section.c_str(); p < section.c_str() + n && *p; p += wcslen(p) + 1) {
+        const std::wstring line = p;
+        const size_t eq = line.find(L'=');
+        if (eq == std::wstring::npos) continue;
+        const int percent = _wtoi(line.c_str() + eq + 1);
+        if (percent >= 10 && percent <= 100) renderScales[line.substr(0, eq)] = percent / 100.0f;
+    }
 }
 
 void Settings::Save() const {
@@ -96,4 +109,6 @@ void Settings::Save() const {
     WritePrivateProfileStringW(kSection, L"GlitchFilter", nullptr, file.c_str());   // replaced by Filter
     WriteInt(file, L"AutoUpdate", autoUpdate ? 1 : 0);
     WriteString(file, L"LastUpdateCheck", std::to_wstring(lastUpdateCheck));
+    for (const auto& [name, scale] : renderScales)
+        WritePrivateProfileStringW(kScaleSection, name.c_str(), std::to_wstring(std::lround(scale * 100.0f)).c_str(), file.c_str());
 }

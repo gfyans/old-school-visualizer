@@ -17,11 +17,16 @@ VisualizerHost::VisualizerHost() {
         const float v = static_cast<float>(_wtof(buf));
         if (v > 0.0f) m_gpuBudgetMs = v;
     }
+    // Dev: render every scene at this scale (still lowered by dynamic scaling if over the GPU budget).
+    if (GetEnvironmentVariableW(L"VISUALIZER_RENDER_SCALE", buf, ARRAYSIZE(buf)) > 0) {
+        const float v = static_cast<float>(_wtof(buf));
+        if (v > 0.0f) m_scaleOverride = std::min(v, 2.0f);
+    }
 }
 
 void VisualizerHost::Add(std::unique_ptr<IVisualizer> viz) {
     Slot slot;
-    slot.scale = viz->RenderScale();
+    slot.scale = StartScale(*viz);
     slot.viz = std::move(viz);
     m_slots.push_back(std::move(slot));
 }
@@ -43,6 +48,8 @@ void VisualizerHost::ReleaseResources() {
     for (Slot& s : m_slots) {
         s.viz->ReleaseResources();
         s.timer.Reset();
+        s.longWindow.Clear();
+        s.shortWindow.Clear();
         s.target.Reset();
     }
     m_device = nullptr;
@@ -176,27 +183,63 @@ int VisualizerHost::ActiveRenderWidth() const { int w, h; ViewportSize(m_slots[m
 int VisualizerHost::ActiveRenderHeight() const { int w, h; ViewportSize(m_slots[m_current], w, h); return h; }
 
 void VisualizerHost::EnsureTarget(Slot& slot) {
-    // Allocate at the preferred scale; dynamic scaling renders into a sub-rectangle of it.
-    const float pref = slot.viz->RenderScale();
+    // Allocate at the highest scale it may reach; variable resolution renders into a sub-rectangle.
+    const float max = MaxScale();
     const int bw = slot.baseW > 0 ? slot.baseW : m_width, bh = slot.baseH > 0 ? slot.baseH : m_height;
-    const int w = std::max(1, static_cast<int>(std::lround(bw * pref)));
-    const int h = std::max(1, static_cast<int>(std::lround(bh * pref)));
+    const int w = std::max(1, static_cast<int>(std::lround(bw * max)));
+    const int h = std::max(1, static_cast<int>(std::lround(bh * max)));
     if (slot.target.width != w || slot.target.height != h)
         slot.target.Create(m_device, w, h, kTargetFormat);
 }
 
 void VisualizerHost::AdaptScale(Slot& slot, float dt) {
-    slot.adjustTimer += dt;
-    if (slot.adjustTimer < 0.5f || !slot.timer.HasValue()) return;
-    slot.adjustTimer = 0.0f;
-
-    // GPU cost scales with pixel count (scale^2): aim for ~70% of budget.
-    const float pref = slot.viz->RenderScale();
+    if (!slot.timer.HasValue()) return;
     const float ms = slot.timer.Milliseconds();
-    float next = slot.scale;
-    if (ms > m_gpuBudgetMs) next = slot.scale * std::sqrt(0.7f * m_gpuBudgetMs / ms);
-    else if (ms < 0.4f * m_gpuBudgetMs) next = slot.scale * 1.05f;
-    slot.scale = std::clamp(next, std::min(kMinScale, pref), pref);
+    for (Slot::Window* w : { &slot.longWindow, &slot.shortWindow }) {
+        w->time += dt;
+        w->sumMs += ms;
+        ++w->frames;
+    }
+    const float hi = MaxScale();
+    const float lo = std::min(kMinScale, hi);
+    auto step = [&](float factor) {
+        slot.scale = std::clamp(slot.scale * factor, lo, hi);
+        slot.longWindow.Clear();    // judge the new scale on its own frames
+        slot.shortWindow.Clear();
+    };
+
+    if (slot.shortWindow.time >= kOverloadWindow) {
+        const float avg = slot.shortWindow.sumMs / slot.shortWindow.frames;
+        slot.shortWindow.Clear();
+        if (avg > kOverload * m_gpuBudgetMs && slot.scale > lo) { step(kStepDown); slot.judged = true; return; }
+    }
+    if (slot.longWindow.time >= kScaleWindow) {
+        const float avg = slot.longWindow.sumMs / slot.longWindow.frames;
+        slot.longWindow.Clear();
+        slot.judged = true;
+        // GPU cost follows pixel count (scale^2): a step up costs 1.05^2 ~ 1.1x, so only take it if
+        // that would still leave 10% of the budget spare (no bouncing between two steps).
+        if (avg > m_gpuBudgetMs && slot.scale > lo) step(kStepDown);
+        else if (slot.scale < hi && avg * kStepUp * kStepUp < 0.9f * m_gpuBudgetMs) step(kStepUp);
+    }
+}
+
+void VisualizerHost::RestoreScales(const std::map<std::wstring, float>& scales) {
+    if (m_scaleOverride > 0.0f) return;   // pinned for testing
+    for (Slot& s : m_slots) {
+        const auto it = scales.find(s.viz->Name());
+        if (it == scales.end()) continue;
+        s.scale = std::clamp(it->second, kMinScale, kMaxScale);
+        s.judged = true;
+    }
+}
+
+std::map<std::wstring, float> VisualizerHost::LearnedScales() const {
+    std::map<std::wstring, float> out;
+    if (m_scaleOverride > 0.0f) return out;   // don't save a pinned test scale
+    for (const Slot& s : m_slots)
+        if (s.judged) out[s.viz->Name()] = s.scale;
+    return out;
 }
 
 void VisualizerHost::RenderSlot(Slot& slot, Renderer& renderer, float time, float dt) {

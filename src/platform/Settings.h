@@ -1,5 +1,6 @@
 #pragma once
 #include <windows.h>
+#include <map>
 #include <string>
 
 // User preferences, remembered between runs in %APPDATA%\Visualizer\settings.ini.
@@ -23,6 +24,9 @@ struct Settings {
     long long lastUpdateCheck = 0;   // unix seconds
     int displayMode = 0;        // fullscreen with several monitors: 0 one monitor, 1 each its own visualiser, 2 span
     std::wstring monitor;       // the monitor for single-monitor fullscreen (device name; empty = where the window is)
+    // Resolution each visualiser settled at under the GPU budget (name -> fraction of the window),
+    // so the next run starts there instead of finding it again. Section [RenderScale], in percent.
+    std::map<std::wstring, float> renderScales;
 
     void Load();
     void Save() const;

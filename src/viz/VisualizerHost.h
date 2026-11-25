@@ -1,4 +1,6 @@
 #pragma once
+#include <algorithm>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -54,12 +56,29 @@ public:
     int ActiveRenderWidth() const;
     int ActiveRenderHeight() const;
 
+    // Resolutions the visualisers settled at (by name), to start from next run. Only ones that have
+    // been judged against the budget (or were restored) are reported.
+    void RestoreScales(const std::map<std::wstring, float>& scales);
+    std::map<std::wstring, float> LearnedScales() const;
+
     VisualizerHost();
 
     // Never spend more than this much GPU time per frame on one visualiser
     // (override with the VISUALIZER_GPU_BUDGET_MS environment variable, for testing).
     static constexpr float kDefaultGpuBudgetMs = 3.0f;
     static constexpr float kMinScale = 0.3f;
+    // Variable resolution: every scene may go up to full resolution; the GPU budget alone holds it
+    // back. Every kScaleWindow seconds its average GPU time is judged (an average, so the spikes of
+    // big hits don't count against it; sitting over the budget does). Over: 10% smaller, then keep
+    // measuring. Under with room for the ~10% more pixels to spare: 5% larger. A heavy overload
+    // (kOverload x the budget over kOverloadWindow seconds, longer than any hit animation) steps
+    // down at once rather than labouring for the whole window.
+    static constexpr float kMaxScale = 1.0f;
+    static constexpr float kScaleWindow = 30.0f;
+    static constexpr float kStepDown = 0.9f;
+    static constexpr float kStepUp = 1.05f;
+    static constexpr float kOverloadWindow = 3.0f;
+    static constexpr float kOverload = 1.5f;
     static constexpr int kTransitionStyles = 5;   // see Renderer::Composite
 
 private:
@@ -67,14 +86,19 @@ private:
         std::unique_ptr<IVisualizer> viz;
         RenderTarget target;   // allocated at the visualiser's preferred scale
         GpuTimer timer;
-        float scale = 1.0f;    // current dynamic scale (<= preferred)
-        float adjustTimer = 0.0f;
+        float scale = 1.0f;    // current dynamic scale (starts at the visualiser's RenderScale())
+        bool judged = false;   // scale has been checked against the budget (or restored from settings)
+        // GPU time averaged over a long window (judges the scale) and a short one (catches overload).
+        struct Window { float time = 0, sumMs = 0; int frames = 0; void Clear() { *this = {}; } };
+        Window longWindow, shortWindow;
         int baseW = 0, baseH = 0;  // size of the area it's shown in (0 = the whole window)
     };
 
     void EnsureTarget(Slot& slot);
     void RenderSlot(Slot& slot, Renderer& renderer, float time, float dt);
     void AdaptScale(Slot& slot, float dt);
+    float StartScale(const IVisualizer& viz) const { return m_scaleOverride > 0.0f ? m_scaleOverride : std::min(viz.RenderScale(), kMaxScale); }
+    float MaxScale() const { return m_scaleOverride > 0.0f ? m_scaleOverride : kMaxScale; }
     CompositeLayer LayerFor(const Slot& slot) const;
     void ViewportSize(const Slot& slot, int& w, int& h) const;
 
@@ -84,6 +108,7 @@ private:
     bool IsShown(int index) const;
     void SetBase(Slot& slot, const RECT* region);
     float m_gpuBudgetMs = kDefaultGpuBudgetMs;
+    float m_scaleOverride = 0.0f;   // VISUALIZER_RENDER_SCALE (dev): pin every scene's start and limit, 0 = off
     ID3D11Device* m_device = nullptr;
     int m_width = 1, m_height = 1;
     int m_current = 0;

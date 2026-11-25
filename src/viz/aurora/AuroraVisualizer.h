@@ -21,7 +21,7 @@ public:
     const wchar_t* Name() const override { return L"Aurora"; }
     bool CreateResources(ID3D11Device* device) override;
     void ReleaseResources() override;
-    float RenderScale() const override { return 0.6f; }   // soft light: upscales cleanly
+    float RenderScale() const override { return 0.75f; }   // soft light: upscales cleanly
     void Update(const AudioFeatures& audio, float dt) override;
     void Render(Renderer& renderer, float time, float dt) override;
     bool OnKey(UINT vk) override;

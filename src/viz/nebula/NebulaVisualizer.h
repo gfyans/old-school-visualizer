@@ -27,7 +27,7 @@ public:
     const wchar_t* Name() const override { return L"Nebula"; }
     bool CreateResources(ID3D11Device* device) override;
     void ReleaseResources() override;
-    float RenderScale() const override { return 0.5f; }   // TAA jitter recovers sub-pixel detail
+    float RenderScale() const override { return 0.75f; }   // TAA jitter recovers sub-pixel detail
     void Activate() override;
     void Update(const AudioFeatures& audio, float dt) override;
     void Render(Renderer& renderer, float time, float dt) override;

@@ -24,7 +24,7 @@ public:
     const wchar_t* Name() const override { return L"Liquid"; }
     bool CreateResources(ID3D11Device* device) override;
     void ReleaseResources() override;
-    float RenderScale() const override { return 0.75f; }
+    float RenderScale() const override { return 1.0f; }
     void Activate() override { m_clear = true; }
     void Update(const AudioFeatures& audio, float dt) override;
     void Render(Renderer& renderer, float time, float dt) override;

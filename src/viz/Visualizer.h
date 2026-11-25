@@ -28,8 +28,10 @@ public:
     virtual bool CreateResources(ID3D11Device* device) = 0;
     virtual void ReleaseResources() = 0;
 
-    // Preferred internal resolution as a fraction of the window (soft, blurry looks can
-    // use 0.5 for ~4x less GPU work). The host may go lower on slow GPUs.
+    // Starting internal resolution as a fraction of the window, the first time this visualiser
+    // runs. The host then finds the highest it can sustain within the GPU budget (up to full
+    // resolution) and remembers it between runs. Heavy scenes start lower so they don't
+    // labour for their first half minute.
     virtual float RenderScale() const { return 1.0f; }
 
     // Called when it becomes the visible visualiser.

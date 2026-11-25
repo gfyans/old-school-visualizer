@@ -22,7 +22,7 @@ public:
     const wchar_t* Name() const override { return L"Detonation"; }
     bool CreateResources(ID3D11Device* device) override;
     void ReleaseResources() override;
-    float RenderScale() const override { return 0.8f; }
+    float RenderScale() const override { return 1.0f; }
     void Update(const AudioFeatures& audio, float dt) override;
     void Render(Renderer& renderer, float time, float dt) override;
     bool OnKey(UINT vk) override;
