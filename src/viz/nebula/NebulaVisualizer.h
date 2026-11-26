@@ -14,11 +14,14 @@
 //   intensity -> flight speed and overall brightness (calm sections drift, loud ones rush)
 //   sections  -> every ~32 beats, or on a sudden "drop", blends to a new look
 //                (palette + gas shape) over a few seconds
-//   phrases   -> the flight swoops to a new heading; sometimes a pulsar appears, its
-//                lighthouse beams sweeping through the gas in time with the bar
-//   build-up  -> the flight dives towards the core, light beams intensify
-//   drop      -> a supernova ahead: blinding flash, lens flare, and a shockwave that lights
-//                the gas as the flight rushes through it
+//   phrases   -> the flight swoops to a new heading; sometimes a pulsar appears just off the
+//                flight path: a star with diffraction spikes whose lighthouse beams sweep through
+//                the gas in time with the bar, leaving a fading wake; it flares as a beam crosses us
+//   build-up  -> the flight dives towards the core, light beams intensify, and a star ahead
+//                charges with the build-up (brighter, tighter, throbbing on the beat)
+//   drop      -> that star goes supernova: blinding flash, lens flare, and a ragged shockwave shell
+//                that lights the gas and shoves it outward as the flight rushes through, leaving a
+//                cleared cavity and a small remnant star
 // Light scattering (lit rims, dark undersides, god rays) and bloom make it all glow.
 class NebulaVisualizer : public IVisualizer {
 public:
@@ -34,9 +37,9 @@ public:
     void Render(Renderer& renderer, float time, float dt) override;
     bool OnKey(UINT vk) override;
     std::vector<VisualizerAction> Actions() const override {
-        return { { 'N', L"Next look" }, { 'Q', L"Supernova" }, { 'P', L"Summon a pulsar" }, { VK_SPACE, L"Lock / unlock the look" } };
+        return { { 'N', L"Next look" }, { 'Q', L"Supernova (press again to blow it now)" }, { 'P', L"Summon a pulsar" }, { VK_SPACE, L"Lock / unlock the look" } };
     }
-    bool Busy() const override { return m_nova.active && m_nova.age < 5.0f; }
+    bool Busy() const override { return m_star.active || (m_nova.active && m_nova.age < 5.0f); }
     std::wstring TakeMessage() override;
     std::wstring Status() const override;
     void AccentColours(float lo[3], float hi[3]) const override;
@@ -59,7 +62,8 @@ private:
 
     // Temporal accumulation (TAA): jittered raymarch -> resolve with reprojected history.
     Microsoft::WRL::ComPtr<ID3D11Device> m_device;
-    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_taaPS, m_postPS;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_taaPS, m_postPS, m_visPS;
+    RenderTarget m_visibility;   // 1x1: light reaching the camera from the pulsar / supernova
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_taaCB, m_postCB;
     RenderTarget m_resolved;     // TAA output with mips, for bloom
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_clamp;
@@ -126,8 +130,13 @@ private:
     // Events (positions in the wrapped world; used relative to the camera)
     struct Pulsar { bool active = false; double pos[3] = {}; float axisU[3] = {}, axisV[3] = {}; float spin = 0.0f, fade = 0.0f, age = 0.0f; };
     struct Supernova { bool active = false; double pos[3] = {}; float age = 0.0f; };
+    // The supernova's progenitor, charging through a build-up; held at a fixed place in the view
+    // (offset: ahead, right, up) until the drop.
+    struct Star { bool active = false; double pos[3] = {}; float offset[3] = {}; float fade = 0.0f, charge = 0.0f; };
     Pulsar m_pulsar;
     Supernova m_nova;
+    Star m_star;
+    float m_manualCharge = -1.0f;   // Q: seconds into a hand-triggered charge, -1 = none
     float m_intensity = 0.0f;
     void SpawnPulsar();
     void Relative(const double world[3], float out[3]) const;   // world point minus the camera, the short way round

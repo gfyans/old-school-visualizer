@@ -1,6 +1,7 @@
 #include "viz/nebula/NebulaVisualizer.h"
 #include "render/Renderer.h"
 #include "g_nebula_ps.h"
+#include "g_nebula_vis_ps.h"
 #include "g_nebula_taa_ps.h"
 #include "g_nebula_post_ps.h"
 #include "g_noise3d_cs.h"
@@ -34,7 +35,9 @@ struct NebulaConstants {   // matches cbuffer Nebula in nebula_ps.hlsl
     float pulsarCol[3];  float snFlash;
     float snPos[3];      float snShellRadius;
     float snCol[3];      float snShellStrength;
-    float fineRange;     float pad[3];
+    float fineRange;     float snStar;  float snPush;  float pulsarStar;
+    float pulsarAxis[3]; float pulsarWake;
+    float snStarCol[3];  float snStarSize;
 };
 static_assert(sizeof(NebulaConstants) % 16 == 0);
 
@@ -49,6 +52,9 @@ static_assert(sizeof(TaaConstants) % 16 == 0);
 struct PostConstants {   // matches cbuffer Post in nebula_post_ps.hlsl
     float snScreen[2]; float snFlare; float bloom;
     float flareCol[3]; float flash;
+    float pulsarScreen[2]; float pulsarFlare; float starFlare;
+    float pulsarFlareCol[3]; float pad0;
+    float starFlareCol[3]; float pad1;
 };
 static_assert(sizeof(PostConstants) % 16 == 0);
 
@@ -166,6 +172,9 @@ bool NebulaVisualizer::CreateResources(ID3D11Device* device) {
     cb.ByteWidth = sizeof(TaaConstants);
     if (FAILED(device->CreateBuffer(&cb, nullptr, &m_taaCB))) return false;
     if (FAILED(device->CreatePixelShader(g_nebula_post_ps, sizeof(g_nebula_post_ps), nullptr, &m_postPS))) return false;
+    if (FAILED(device->CreatePixelShader(g_nebula_vis_ps, sizeof(g_nebula_vis_ps), nullptr, &m_visPS))) return false;
+    // One pixel: how much light reaches the camera from the pulsar (r) and the supernova (g).
+    if (!m_visibility.Create(device, 1, 1, DXGI_FORMAT_R16G16B16A16_FLOAT)) return false;
     cb.ByteWidth = sizeof(PostConstants);
     if (FAILED(device->CreateBuffer(&cb, nullptr, &m_postCB))) return false;
     m_historyValid = false;
@@ -230,6 +239,8 @@ void NebulaVisualizer::ReleaseResources() {
     m_resolved.Reset();
     m_postCB.Reset();
     m_postPS.Reset();
+    m_visPS.Reset();
+    m_visibility.Reset();
     m_history[0].Reset();
     m_history[1].Reset();
     m_taaCB.Reset();
@@ -287,13 +298,14 @@ void NebulaVisualizer::Relative(const double world[3], float out[3]) const {
     }
 }
 
-// A pulsar appears well ahead and off to one side, so the flight sweeps past it.
+// A pulsar appears ahead and just off the flight path, so the flight sweeps close past it,
+// its beams wheeling around the camera.
 void NebulaVisualizer::SpawnPulsar() {
     const float* right = m_basis[0];
     const float* up = m_basis[1];
     const float* fwd = m_basis[2];
     const float side = std::uniform_int_distribution<int>(0, 1)(m_rng) ? 1.0f : -1.0f;
-    const float dist = Rand(m_rng, 20.0f, 26.0f), lateral = side * Rand(m_rng, 3.5f, 6.5f), lift = Rand(m_rng, -2.5f, 2.5f);
+    const float dist = Rand(m_rng, 15.0f, 19.0f), lateral = side * Rand(m_rng, 2.5f, 4.0f), lift = Rand(m_rng, -1.5f, 1.5f);
     for (int i = 0; i < 3; ++i) m_pulsar.pos[i] = m_pos[i] + fwd[i] * dist + right[i] * lateral + up[i] * lift;
     // Spin axis: tilted, so the beams sweep across the view rather than straight at the camera.
     float axis[3] = { Rand(m_rng, -1, 1), Rand(m_rng, -1, 1), Rand(m_rng, -1, 1) };
@@ -339,8 +351,15 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
         const float* fwd = m_basis[2];
         const float* right = m_basis[0];
         const float* up = m_basis[1];
-        const float lat = Rand(m_rng, -2.0f, 2.0f), lift = Rand(m_rng, -1.2f, 1.2f);
-        for (int i = 0; i < 3; ++i) m_nova.pos[i] = m_pos[i] + fwd[i] * 13.0f + right[i] * lat + up[i] * lift;
+        if (m_star.active && m_star.fade > 0.2f) {
+            memcpy(m_nova.pos, m_star.pos, sizeof(m_nova.pos));   // the star that charged through the build-up blows
+        } else {
+            const float lat = Rand(m_rng, -2.0f, 2.0f), lift = Rand(m_rng, -1.2f, 1.2f);
+            for (int i = 0; i < 3; ++i) m_nova.pos[i] = m_pos[i] + fwd[i] * 13.0f + right[i] * lat + up[i] * lift;
+        }
+        m_star.active = false;
+        m_star.fade = 0.0f;
+        m_manualCharge = -1.0f;
         m_nova.active = true;
         m_nova.age = 0.0f;
         if (!m_locked && m_timeSinceChange > 4.0f) NextLook(1.5f);
@@ -369,7 +388,7 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
         float rel[3];
         Relative(m_pulsar.pos, rel);
         const float ahead = rel[0] * m_basis[2][0] + rel[1] * m_basis[2][1] + rel[2] * m_basis[2][2];
-        const bool leaving = ahead < 3.0f || m_pulsar.age > 50.0f;
+        const bool leaving = ahead < -4.0f || m_pulsar.age > 50.0f;   // once it's behind us
         m_pulsar.fade = std::clamp(m_pulsar.fade + dt * (leaving ? -0.6f : 0.5f), 0.0f, 1.0f);
         if (leaving && m_pulsar.fade <= 0.0f) m_pulsar.active = false;
         if (gridLocked) m_pulsar.spin = 6.2831853f * 2.0f * audio.barPhase;
@@ -382,6 +401,30 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
     m_mids = Smooth(m_mids, 0.5f * (audio.lowMid + audio.highMid), dt, 0.1f, 0.6f);
     m_treble = Smooth(m_treble, std::max(audio.treble * 0.6f, audio.hat), dt, 0.02f, 0.2f);
     m_buildUp = Smooth(m_buildUp, audio.buildUp, dt, 0.5f, 0.3f);
+
+    // The supernova's progenitor: a star ahead that appears as a build-up gets going and
+    // charges with it (brighter, tighter), held at a fixed place in the view so the dive
+    // doesn't fly past it. The drop blows it (above); a build-up that fizzles lets it fade.
+    // Q runs the same thing by hand: a 2.5 s charge, then the drop.
+    float charge = m_buildUp;
+    if (m_manualCharge >= 0.0f) {
+        m_manualCharge += dt;
+        charge = std::max(charge, std::min(1.0f, m_manualCharge / 2.5f));
+        if (m_manualCharge > 2.5f) m_lastDropCount = ~audio.dropCount;   // detonate next frame
+    }
+    if (!m_star.active && charge > 0.3f && !(m_nova.active && m_nova.age < 8.0f)) {
+        m_star.active = true;
+        m_star.fade = 0.0f;
+        m_star.offset[0] = Rand(m_rng, 14.0f, 17.0f);
+        m_star.offset[1] = Rand(m_rng, 1.5f, 3.0f) * (std::uniform_int_distribution<int>(0, 1)(m_rng) ? 1.0f : -1.0f);
+        m_star.offset[2] = Rand(m_rng, -1.0f, 1.0f);
+        m_nova.active = false;   // a new one takes over the old remnant
+    }
+    if (m_star.active) {
+        m_star.charge = charge;
+        m_star.fade = std::clamp(m_star.fade + dt * (charge > 0.15f ? 0.6f : -0.35f), 0.0f, 1.0f);
+        if (m_star.fade <= 0.0f && charge <= 0.15f) m_star.active = false;
+    }
 
     // Build-ups accelerate the flight; drops hit hard then settle.
     const float targetSpeed = audio.silent ? 0.25f
@@ -443,6 +486,9 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
         m_pos[c] = std::fmod(m_pos[c], kWorldPeriod);
         if (m_pos[c] < 0) m_pos[c] += kWorldPeriod;
     }
+    if (m_star.active)
+        for (int c = 0; c < 3; ++c)
+            m_star.pos[c] = m_pos[c] + m_basis[2][c] * m_star.offset[0] + m_basis[0][c] * m_star.offset[1] + m_basis[1][c] * m_star.offset[2];
 }
 
 void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
@@ -490,24 +536,62 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
 
     // Events
     const float hotWhite[3] = { 0.85f, 0.92f, 1.0f };
+    // Where a point (relative to the camera) is on screen, for the lens flares; false if behind us.
+    auto toScreen = [&](const float rel[3], float out[2]) {
+        const float z = rel[0] * fwd[0] + rel[1] * fwd[1] + rel[2] * fwd[2];
+        if (z <= 0.5f) return false;
+        const float aspect = static_cast<float>(renderer.BoundWidth()) / std::max(renderer.BoundHeight(), 1);
+        const float sx = (rel[0] * right[0] + rel[1] * right[1] + rel[2] * right[2]) / (z * c.tanHalfFov);
+        const float sy = (rel[0] * up[0] + rel[1] * up[1] + rel[2] * up[2]) / (z * c.tanHalfFov);
+        out[0] = (sx / aspect + 1.0f) * 0.5f;
+        out[1] = (1.0f - sy) * 0.5f;
+        return true;
+    };
+    PostConstants post{};
+    post.snScreen[0] = post.snScreen[1] = post.pulsarScreen[0] = post.pulsarScreen[1] = -10.0f;
+
     if (m_pulsar.active && m_pulsar.fade > 0.0f) {
         float rel[3];
         Relative(m_pulsar.pos, rel);
         const float cs = std::cos(m_pulsar.spin), sn = std::sin(m_pulsar.spin);
+        const float* u = m_pulsar.axisU;
+        const float* v = m_pulsar.axisV;
+        const float axis[3] = { u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0] };
         for (int i = 0; i < 3; ++i) {
             c.pulsarPos[i] = c.camPos[i] + rel[i];
-            c.pulsarDir[i] = m_pulsar.axisU[i] * cs + m_pulsar.axisV[i] * sn;
+            c.pulsarDir[i] = u[i] * cs + v[i] * sn;
+            c.pulsarAxis[i] = axis[i];
             c.pulsarCol[i] = 0.6f * hotWhite[i] + 0.4f * look.hot[i];
         }
         const float f = m_pulsar.fade * m_pulsar.fade * (3.0f - 2.0f * m_pulsar.fade);
         c.pulsarStrength = f * (0.8f + 0.5f * m_gridPulse);
         c.pulsarWidth = 0.22f;
+        c.pulsarWake = f * 0.9f;
+        c.pulsarStar = f * 1.6f;
+        // Lighthouse: the star flares as one of its beams swings across us.
+        float toCam[3] = { -rel[0], -rel[1], -rel[2] };
+        Normalize3(toCam);
+        const float facing = std::pow(std::fabs(toCam[0] * c.pulsarDir[0] + toCam[1] * c.pulsarDir[1] + toCam[2] * c.pulsarDir[2]), 24.0f);
+        if (toScreen(rel, post.pulsarScreen)) post.pulsarFlare = f * (0.5f + 1.5f * facing);
+        for (int i = 0; i < 3; ++i) post.pulsarFlareCol[i] = c.pulsarCol[i];
     } else {
         c.pulsarPos[0] = c.camPos[0] + 1e4f;   // far away: contributes nothing
     }
+
     float novaFlare = 0.0f;
-    float novaScreen[2] = { -10.0f, -10.0f };
-    if (m_nova.active) {
+    if (m_star.active && m_star.fade > 0.0f) {
+        // Charging: brighter and tighter as the build-up rises, throbbing on the beat.
+        float rel[3];
+        Relative(m_star.pos, rel);
+        const float f = m_star.fade * m_star.fade * (3.0f - 2.0f * m_star.fade), k = m_star.charge;
+        for (int i = 0; i < 3; ++i) {
+            c.snPos[i] = c.camPos[i] + rel[i];
+            c.snStarCol[i] = look.hot[i] + (hotWhite[i] - look.hot[i]) * k;
+        }
+        c.snStar = f * (0.5f + 2.5f * k) * (1.0f + 0.6f * k * m_gridPulse);
+        c.snStarSize = 0.03f - 0.022f * k;
+        if (toScreen(rel, post.snScreen)) post.starFlare = c.snStar * 0.6f;
+    } else if (m_nova.active) {
         float rel[3];
         Relative(m_nova.pos, rel);
         const float a = m_nova.age;
@@ -515,26 +599,27 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
         const float remnant = 0.18f * std::exp(-a / 5.0f) * std::min(1.0f, a * 4.0f);
         c.snFlash = flash * 1.2f + remnant;
         c.snShellRadius = a * 9.0f;
-        c.snShellStrength = 1.6f * std::max(0.0f, 1.0f - a / 3.0f);
+        c.snShellStrength = 1.6f * std::max(0.0f, 1.0f - a / 3.5f);
+        // The blast shoves the gas outward as the shock passes (easing back once it's long gone).
+        c.snPush = 3.0f * std::min(1.0f, a / 1.2f) * std::clamp((14.0f - a) / 5.0f, 0.0f, 1.0f);
+        // What's left: a small, hard, blue-white star where it was.
+        const float left = std::clamp((a - 1.0f) / 2.0f, 0.0f, 1.0f) * std::clamp((14.0f - a) / 4.0f, 0.0f, 1.0f);
+        c.snStar = 0.7f * left;
+        c.snStarSize = 0.006f;
         const float shift = std::min(1.0f, a / 2.5f);   // white-hot, then the look's colours
         for (int i = 0; i < 3; ++i) {
             c.snPos[i] = c.camPos[i] + rel[i];
             c.snCol[i] = hotWhite[i] * (1.0f - shift) + (0.5f * look.hot[i] + 0.5f * look.mid[i]) * shift;
+            c.snStarCol[i] = hotWhite[i];
         }
-        // Where it is on screen, for the lens flare.
-        const float z = rel[0] * fwd[0] + rel[1] * fwd[1] + rel[2] * fwd[2];
-        if (z > 0.5f) {
-            const int bw = renderer.BoundWidth(), bh = renderer.BoundHeight();
-            const float aspect = static_cast<float>(bw) / std::max(bh, 1);
-            const float sx = (rel[0] * right[0] + rel[1] * right[1] + rel[2] * right[2]) / (z * c.tanHalfFov);
-            const float sy = (rel[0] * up[0] + rel[1] * up[1] + rel[2] * up[2]) / (z * c.tanHalfFov);
-            novaScreen[0] = (sx / aspect + 1.0f) * 0.5f;
-            novaScreen[1] = (1.0f - sy) * 0.5f;
+        if (toScreen(rel, post.snScreen)) {
             novaFlare = flash * 1.0f + remnant * 1.5f;
+            post.starFlare = c.snStar * 0.4f;
         }
     } else {
         c.snPos[0] = c.camPos[0] + 1e4f;
     }
+    for (int i = 0; i < 3; ++i) post.starFlareCol[i] = c.snStarCol[i];
 
     // --- Temporal accumulation setup ---
     ID3D11RenderTargetView* hostTarget = renderer.BoundTarget();
@@ -582,9 +667,6 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
     };
     upload(m_cb.Get(), &c, sizeof(c));
     upload(m_taaCB.Get(), &taa, sizeof(taa));
-    PostConstants post{};
-    post.snScreen[0] = novaScreen[0];
-    post.snScreen[1] = novaScreen[1];
     post.snFlare = novaFlare;
     post.bloom = 1.0f + 0.6f * m_buildUp + 0.5f * m_bass + 0.8f * m_dropFlash;
     for (int i = 0; i < 3; ++i) post.flareCol[i] = c.snCol[i];
@@ -601,6 +683,14 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
     ctx->PSSetShaderResources(0, 1, &noise);
     ctx->PSSetSamplers(0, 1, &wrap);
     renderer.DrawFullscreen(m_ps.Get());
+    // ...and one pixel's worth: how much gas hides the pulsar and the supernova (for the flares).
+    if (post.pulsarFlare > 0.0f || post.snFlare > 0.0f || post.starFlare > 0.0f) {
+        renderer.BindTarget(m_visibility.rtv.Get(), 1, 1, time, dt);
+        ctx->PSSetConstantBuffers(2, 2, cbs);
+        ctx->PSSetShaderResources(0, 1, &noise);
+        ctx->PSSetSamplers(0, 1, &wrap);
+        renderer.DrawFullscreen(m_visPS.Get());
+    }
     ctx->PSSetShaderResources(0, 1, none);
 
     // Pass 2: resolve against history -> resolved image + new history (two outputs).
@@ -622,12 +712,12 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
     ctx->GenerateMips(m_resolved.srv.Get());
     renderer.BindTarget(hostTarget, w, h, time, dt);
     ID3D11Buffer* postCB = m_postCB.Get();
-    ID3D11ShaderResourceView* resolved = m_resolved.srv.Get();
+    ID3D11ShaderResourceView* postInputs[2] = { m_resolved.srv.Get(), m_visibility.srv.Get() };
     ctx->PSSetConstantBuffers(3, 1, &postCB);
-    ctx->PSSetShaderResources(0, 1, &resolved);
+    ctx->PSSetShaderResources(0, 2, postInputs);
     ctx->PSSetSamplers(0, 1, &clamp);
     renderer.DrawFullscreen(m_postPS.Get());
-    ctx->PSSetShaderResources(0, 1, none);
+    ctx->PSSetShaderResources(0, 2, none);
     m_historyIndex = 1 - m_historyIndex;
     m_historyValid = true;
 
@@ -642,8 +732,9 @@ bool NebulaVisualizer::OnKey(UINT vk) {
         NextLook();
         return true;
     }
-    if (vk == 'Q') {   // supernova, as on a drop
-        m_lastDropCount = ~0u;
+    if (vk == 'Q') {   // supernova: charge for a moment, then the drop (a second press blows it at once)
+        if (m_manualCharge < 0.0f && !(m_star.active && m_star.fade > 0.2f)) m_manualCharge = 0.0f;
+        else m_lastDropCount = ~0u;
         return true;
     }
     if (vk == 'P') {   // summon a pulsar

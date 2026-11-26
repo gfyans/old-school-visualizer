@@ -5,9 +5,16 @@
 // illuminates nearby gas, and each gas sample looks a short way towards it to see how
 // much gas is in the way (light scattering): clouds get bright rims facing the core,
 // dark undersides, and beams of light through the gaps. Events add more light sources:
-// a pulsar whose lighthouse beams sweep through the gas in time with the music, and on drops a supernova whose shockwave lights the gas as it passes. Stars show
-// through wherever the gas is thin. All audio response is computed on the CPU
+//   pulsar     a spinning star whose lighthouse beams sweep through the gas in time with the
+//              music, leaving a fading wake of lit gas behind each sweep
+//   supernova  during a build-up a star ahead brightens and tightens; on the drop it blows:
+//              a flash, then a ragged shockwave shell (visible even in empty space) that lights
+//              the gas and shoves it outward as it passes, leaving a small remnant star
+// Stars show through wherever the gas is thin. All audio response is computed on the CPU
 // (NebulaVisualizer.cpp) and arrives here as smooth parameters.
+//
+// Compiled twice: as the raymarch, and with NEB_VISIBILITY as a one-pixel pass that measures
+// how much gas lies between the camera and the pulsar / supernova (for their lens flares).
 
 cbuffer Nebula : register(b2) {   // matches NebulaConstants in NebulaVisualizer.cpp
     float3 camPos;      float tanHalfFov;
@@ -27,7 +34,9 @@ cbuffer Nebula : register(b2) {   // matches NebulaConstants in NebulaVisualizer
     float3 pulsarCol;   float snFlash;
     float3 snPos;       float snShellRadius;
     float3 snCol;       float snShellStrength;
-    float fineRange;    float3 nebulaPad;     // the most the finest octave can move the density field (see Gas)
+    float fineRange;    float snStar;  float snPush;  float pulsarStar;   // fineRange: see Gas; snStar: progenitor / remnant brightness
+    float3 pulsarAxis;  float pulsarWake;     // spin axis (beams sweep the plane across it); wake brightness
+    float3 snStarCol;   float snStarSize;     // progenitor / remnant colour, and its halo's angular size
 };
 
 Texture3D<float4> Noise : register(t0);
@@ -35,6 +44,7 @@ SamplerState Wrap : register(s0);
 
 static const int kMaxSteps = 56;
 static const float kMaxDist = 34.0;
+static const float3 kShockBlue = float3(0.70, 0.86, 1.0);   // the shockwave's leading edge
 
 float3 Palette(float t) {
     t = saturate(t);
@@ -42,9 +52,29 @@ float3 Palette(float t) {
     return lerp(lo, colHot, smoothstep(0.5, 1.0, t));
 }
 
+// The supernova's blast: behind its shockwave the gas has been shoved outward by up to snPush
+// units (so the noise at p is what used to be nearer the centre), it piles up just behind the
+// front, and the cavity inside thins out. Returns where to sample the gas; scale multiplies its density.
+float3 Blast(float3 p, out float scale) {
+    scale = 1.0;
+    float3 moved = p;
+    [branch] if (snPush > 0.0) {
+        float3 sv = p - snPos;
+        float ds = length(sv);
+        float edge = ds - snShellRadius;                      // < 0: the shock has passed this point
+        float push = snPush * smoothstep(1.2, -1.5, edge);
+        float k = snPush / 3.0;
+        scale = (1.0 + 0.6 * k * exp(-edge * edge * 1.5)) * lerp(1.0, 0.35, smoothstep(-1.0, -6.0, edge) * k);
+        moved = p - sv / max(ds, 1e-3) * min(push, ds * 0.85);
+    }
+    return moved;
+}
+
 // World space wraps every 64 units (all noise periods divide 64), so the
 // camera position can wrap without visible seams.
 void Gas(float3 p, out float density, out float dust, out float shade, out float glint) {
+    float blastScale;
+    p = Blast(p, blastScale);
     // Two levels of domain warping: broad swirls, then finer turbulence.
     float4 w = Noise.SampleLevel(Wrap, p / 64.0 + warpOffset, 0);
     float3 q = p + (float3(w.x, w.z, w.y) - 0.5) * warp;
@@ -61,9 +91,9 @@ void Gas(float3 p, out float density, out float dust, out float shade, out float
     [branch] if ((coarse - fineRange - threshold) * gain < 1.0 && (coarse + fineRange - threshold) * gain > 0.0)
         fineTerm = (Noise.SampleLevel(Wrap, q / 4.0, 0).x - 0.5) * detail * 0.5;
     float d = base + (b.x - 0.5) * detail + fineTerm - (1.0 - b.w) * 0.09;
-    density = saturate((d - threshold) * gain);
+    density = saturate(saturate((d - threshold) * gain) * blastScale);
     // Dark dust lanes: absorb light but don't glow.
-    dust = saturate((w.y - 0.58) * 6.0) * saturate((b.y - 0.35) * 2.0);
+    dust = saturate((w.y - 0.58) * 6.0) * saturate((b.y - 0.35) * 2.0) * min(blastScale, 1.0);
     shade = saturate((a.z - 0.5) * 2.2 + 0.5);
     glint = b.w;
 }
@@ -71,12 +101,46 @@ void Gas(float3 p, out float density, out float dust, out float shade, out float
 // A cheaper density (first warp level and the two main octaves) for the light-scattering
 // look-ahead: close enough to say whether gas lies between a point and the light.
 float GasLite(float3 p) {
+    float blastScale;
+    p = Blast(p, blastScale);
     float4 w = Noise.SampleLevel(Wrap, p / 64.0 + warpOffset, 0);
     float3 q = p + (float3(w.x, w.z, w.y) - 0.5) * warp;
     float4 a = Noise.SampleLevel(Wrap, q / 32.0, 0);
     float4 b = Noise.SampleLevel(Wrap, q / 8.0, 0);
-    return saturate((lerp(a.x, a.y, filament) + (b.x - 0.5) * detail - threshold) * gain);
+    return saturate(saturate((lerp(a.x, a.y, filament) + (b.x - 0.5) * detail - threshold) * gain) * blastScale);
 }
+
+// Gas fades out very close to the lens (up close the noise is magnified into big soft blobs)
+// and towards the far end of the march.
+float GasFade(float t) { return smoothstep(1.0, 5.5, t) * smoothstep(kMaxDist, kMaxDist * 0.5, t); }
+
+#if NEB_VISIBILITY
+
+// How much light gets from a point to the camera through the gas (same steps as the raymarch).
+float Transmittance(float3 target) {
+    float3 rel = target - camPos;
+    float dist = length(rel);
+    float3 rd = rel / max(dist, 1e-4);
+    float t = 0.25, transmittance = 1.0;
+    [loop] for (int s = 0; s < kMaxSteps && t < min(dist, kMaxDist); ++s) {
+        float stepLen = 0.2 + t * 0.03;
+        float fade = GasFade(t);
+        [branch] if (fade * 2.0 > 0.003) {
+            float density, dust, shade, glint;
+            Gas(camPos + rd * t, density, dust, shade, glint);
+            transmittance *= exp(-(density * absorb + dust * 1.5) * fade * stepLen);
+            if (transmittance < 0.01) break;
+        }
+        t += stepLen;
+    }
+    return transmittance;
+}
+
+float4 main(VSOut i) : SV_Target {
+    return float4(Transmittance(pulsarPos), Transmittance(snPos), 0, 1);
+}
+
+#else
 
 float3 Stars(float3 rd) {
     float3 acc = 0;
@@ -100,6 +164,20 @@ float3 Stars(float3 rd) {
     return acc * starBoost;
 }
 
+// A star as a point in the volume: how bright this ray sees it, and the distance along the ray
+// where it sits (it's added there, so gas in front hides it and gas behind doesn't).
+// size: angular radius of the soft halo; the core is about a pixel across.
+float3 PointStar(float3 rd, float3 pos, float3 colour, float brightness, float size, out float along) {
+    float3 rel = pos - camPos;
+    along = dot(rel, rd);
+    if (brightness <= 0.0 || along <= 0.0) { along = -1.0; return 0; }
+    float ang = sqrt(max(dot(rel, rel) - along * along, 0.0)) / along;   // angle off the ray
+    float pixel = 2.0 * tanHalfFov / iResolution.y;
+    float core = 1.0 / (1.0 + (ang * ang) / (pixel * pixel * 1.5));
+    float halo = exp(-ang / size) * 0.25 + exp(-ang / (size * 4.0)) * 0.05;
+    return colour * brightness * (core * 4.0 + halo);
+}
+
 float4 main(VSOut i) : SV_Target {
     float aspect = iResolution.x / iResolution.y;
     // Sub-pixel jitter changes every frame; the TAA resolve averages it into extra detail.
@@ -114,9 +192,29 @@ float4 main(VSOut i) : SV_Target {
     float3 col = 0;
     float depthSum = 0.0, depthWeight = 0.0;   // opacity-weighted distance, for reprojection
 
+    // The pulsar and the supernova's star, as points: added when the march reaches them.
+    float pulsarAt, starAt;
+    float3 pulsarLight = PointStar(rd, pulsarPos, lerp(pulsarCol, 1.0, 0.5), pulsarStar, 0.012, pulsarAt);
+    float3 starLight = PointStar(rd, snPos, snStarCol, snStar, snStarSize, starAt);
+    float3 wakeSide = cross(pulsarAxis, pulsarDir);   // the way the beams are turning
+
     [loop] for (int s = 0; s < kMaxSteps; ++s) {
         float stepLen = 0.2 + t * 0.03;   // finer steps up close
         float3 p = camPos + rd * t;
+
+        // Point stars between this step and the next (bright ones also anchor the reprojection).
+        [branch] if (pulsarAt >= 0.0 && pulsarAt < t + stepLen) {
+            col += transmittance * pulsarLight;
+            float wgt = saturate(max(pulsarLight.r, max(pulsarLight.g, pulsarLight.b))) * transmittance;
+            depthSum += wgt * pulsarAt; depthWeight += wgt;
+            pulsarAt = -1.0;
+        }
+        [branch] if (starAt >= 0.0 && starAt < t + stepLen) {
+            col += transmittance * starLight;
+            float wgt = saturate(max(starLight.r, max(starLight.g, starLight.b))) * transmittance;
+            depthSum += wgt * starAt; depthWeight += wgt;
+            starAt = -1.0;
+        }
 
         float3 toLight = lightPos - p;
         float dl2 = dot(toLight, toLight);
@@ -124,24 +222,36 @@ float4 main(VSOut i) : SV_Target {
         float glow = lightStrength / (1.0 + dl2 * 0.12);
         float shell = shellStrength * exp(-abs(dl - shellRadius) * 1.4);
 
-        // Pulsar: two narrow beams from a spinning star, widening slightly with distance.
-        float3 pv = p - pulsarPos;
-        float along = dot(pv, pulsarDir);
-        float perp2 = dot(pv, pv) - along * along;
-        float bw = pulsarWidth * (1.0 + abs(along) * 0.08);
-        float beam = pulsarStrength * exp(-perp2 / (bw * bw)) * exp(-abs(along) * 0.04);
-        float pulsarCore = pulsarStrength * 2.0 / (1.0 + dot(pv, pv) * 6.0);
+        // Pulsar: two narrow beams from a spinning star, widening slightly with distance, and
+        // behind them a wake: the plane they sweep stays lit for a moment after they pass.
+        float beam = 0, pulsarCore = 0, wake = 0;
+        [branch] if (pulsarStrength > 0.0) {
+            float3 pv = p - pulsarPos;
+            float along = dot(pv, pulsarDir);
+            float pv2 = dot(pv, pv);
+            float perp2 = pv2 - along * along;
+            float bw = pulsarWidth * (1.0 + abs(along) * 0.08);
+            beam = pulsarStrength * exp(-perp2 / (bw * bw)) * exp(-abs(along) * 0.04);
+            pulsarCore = pulsarStrength * 1.5 / (1.0 + pv2 * 0.8);   // lights a pocket of gas around it, so it shows even deep in cloud
+            float h = dot(pv, pulsarAxis);                          // height off the swept plane
+            float r = sqrt(max(pv2 - h * h, 1e-6));
+            float phi = atan2(dot(pv, wakeSide), along);            // angle ahead of the + beam
+            float behind = frac(-phi / 3.14159265) * 3.14159265;    // since either beam passed
+            float thick = 0.3 + r * 0.06;
+            wake = pulsarWake * exp(-behind * 1.6) * exp(-h * h / (thick * thick)) * exp(-r * 0.06) * saturate(r * 2.0);
+        }
 
         // Supernova: a blinding flash, then a shockwave shell that lights the gas as it passes.
-        float3 sv = p - snPos;
-        float ds = length(sv);
-        float snGlow = snFlash * 2.5 / (1.0 + ds * ds * 0.15);
-        float snShell = snShellStrength * exp(-abs(ds - snShellRadius) * 1.1);
+        float snGlow = 0, snShell = 0, ds = 1e4;
+        [branch] if (snFlash + snShellStrength > 0.0) {
+            ds = length(p - snPos);
+            snGlow = snFlash * 2.5 / (1.0 + ds * ds * 0.15);
+            snShell = snShellStrength * exp(-abs(ds - snShellRadius) * 1.1);
+        }
 
-        // Fade gas very close to the lens: up close the noise is magnified into big soft blobs.
-        // Density and dust are each at most 1, so where the fade is this small no sample can pass
-        // the threshold below: skip the noise reads (the first few steps of every ray, ~8% faster).
-        float fade = smoothstep(1.0, 5.5, t) * smoothstep(kMaxDist, kMaxDist * 0.5, t);
+        // Skip the noise reads where the near/far fade leaves nothing to see: density and dust
+        // are each at most 1, so no sample there can pass the threshold below (~8% faster).
+        float fade = GasFade(t);
         float density = 0, dust = 0, shade = 0, glint = 0;
         [branch] if (fade * 2.0 > 0.003) {
             Gas(p, density, dust, shade, glint);
@@ -158,14 +268,14 @@ float4 main(VSOut i) : SV_Target {
             }
             float light = glow * (0.15 + 0.85 * lit);
             // Thin gas sits in the deep colour; dense or lit cores climb to the hot colour.
-            float heat = density * 0.75 + (shade - 0.5) * 0.45 + light * 0.18 + shell * 0.3 + snShell * 0.6 + beam * 0.3;
+            float heat = density * 0.75 + (shade - 0.5) * 0.45 + light * 0.18 + shell * 0.3 + snShell * 0.6 + beam * 0.3 + wake * 0.3;
             float3 c = Palette(heat);
             float3 emission = c * (ambient + light + shell * 1.6) * (0.12 + density)
                             + colHot * (pow(saturate(glint), 10.0) * sparkle * (0.5 + glow) * density);
             // Rims: the thin, lit edges of clouds facing the core glow hot.
             emission += colHot * glow * lit * saturate(1.0 - density * 2.5) * density * 0.6;
             // Event light falling on the gas.
-            emission += pulsarCol * (beam * 1.3 + pulsarCore) * (0.05 + density);
+            emission += pulsarCol * (beam * 1.3 + pulsarCore + wake * 0.9) * (0.05 + density);
             emission += snCol * (snGlow + snShell * 1.6) * (0.05 + density);
             emission *= exp(-t * 0.035);   // distant gas recedes into darkness: depth
             float alphaGas = 1.0 - exp(-density * stepLen * absorb);
@@ -178,13 +288,25 @@ float4 main(VSOut i) : SV_Target {
         }
         // Light scattered by thin dust between clouds: the core's halo and beams through the
         // gaps (gas in front has already cut the transmittance, which makes the rays).
-        col += transmittance * stepLen * (lightColor * glow * glow * 0.012 * scatter
-                                        + pulsarCol * (beam * 0.025 + pulsarCore * 0.02)
-                                        + snCol * snGlow * 0.012);
+        float3 scattered = lightColor * glow * glow * 0.012 * scatter
+                         + pulsarCol * (beam * 0.025 + pulsarCore * 0.02 + wake * 0.006)
+                         + snCol * snGlow * 0.012;
+        // The shockwave itself: a thin, ragged shell of hot gas, visible even where there's no
+        // cloud to light. Blue-white at the leading edge, the look's hot colour behind it.
+        [branch] if (snShellStrength > 0.0) {
+            float edge = ds - (snShellRadius + (shade - 0.5) * 1.6 + (glint - 0.5) * 0.8);
+            float width = 0.35 + snShellRadius * 0.04;
+            float front = exp(-edge * edge / (width * width));
+            scattered += lerp(colHot * 1.4, kShockBlue, smoothstep(-width, width, edge)) * front * snShellStrength * 0.07;
+        }
+        col += transmittance * stepLen * scattered;
 
         t += stepLen;
         if (t > kMaxDist) break;
     }
+    // Point stars beyond the end of the march.
+    if (pulsarAt >= 0.0) col += transmittance * pulsarLight;
+    if (starAt >= 0.0) col += transmittance * starLight;
     col += transmittance * Stars(rd);
 
     // Hue-preserving tonemap on the brightest channel: bright gas stays coloured instead of
@@ -202,3 +324,5 @@ float4 main(VSOut i) : SV_Target {
     float depth = depthWeight > 0.05 ? depthSum / depthWeight : 1000.0;
     return float4(col, depth);   // bloom and vignette are applied after the TAA resolve
 }
+
+#endif
