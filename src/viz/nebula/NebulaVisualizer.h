@@ -54,6 +54,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_cb;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_sampler;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_noise;
+    float m_noiseRedRange = 0.5f;   // how far the noise volume's red channel strays from 0.5
 
     // Temporal accumulation (TAA): jittered raymarch -> resolve with reprojected history.
     Microsoft::WRL::ComPtr<ID3D11Device> m_device;

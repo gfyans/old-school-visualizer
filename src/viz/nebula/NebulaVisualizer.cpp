@@ -34,6 +34,7 @@ struct NebulaConstants {   // matches cbuffer Nebula in nebula_ps.hlsl
     float pulsarCol[3];  float snFlash;
     float snPos[3];      float snShellRadius;
     float snCol[3];      float snShellStrength;
+    float fineRange;     float pad[3];
 };
 static_assert(sizeof(NebulaConstants) % 16 == 0);
 
@@ -194,6 +195,33 @@ bool NebulaVisualizer::CreateResources(ID3D11Device* device) {
     ID3D11UnorderedAccessView* none[] = { nullptr };
     ctx->CSSetUnorderedAccessViews(0, 1, none, nullptr);
     ctx->CSSetShader(nullptr, nullptr, 0);
+
+    // Read the volume back once for how far its red channel strays from 0.5. The raymarch uses
+    // it to skip its finest noise octave wherever that can't change the result (see Gas() in
+    // nebula_ps.hlsl). If the read-back fails, 0.5 is the loosest bound, and still exact.
+    m_noiseRedRange = 0.5f;
+    td.Usage = D3D11_USAGE_STAGING;
+    td.BindFlags = 0;
+    td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    Microsoft::WRL::ComPtr<ID3D11Texture3D> staging;
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    if (SUCCEEDED(device->CreateTexture3D(&td, nullptr, &staging))) {
+        ctx->CopyResource(staging.Get(), tex.Get());
+        if (SUCCEEDED(ctx->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+            int lo = 255, hi = 0;
+            for (int z = 0; z < kNoiseSize; ++z)
+                for (int y = 0; y < kNoiseSize; ++y) {
+                    const uint8_t* row = static_cast<const uint8_t*>(mapped.pData) + z * mapped.DepthPitch + y * mapped.RowPitch;
+                    for (int x = 0; x < kNoiseSize; ++x) {
+                        lo = std::min<int>(lo, row[x * 4]);
+                        hi = std::max<int>(hi, row[x * 4]);
+                    }
+                }
+            ctx->Unmap(staging.Get(), 0);
+            // Filtering never leaves the range of the texels it blends.
+            m_noiseRedRange = std::max(std::fabs(lo / 255.0f - 0.5f), std::fabs(hi / 255.0f - 0.5f));
+        }
+    }
     return true;
 }
 
@@ -457,6 +485,7 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
     c.warpOffset[1] = m_swirl * 0.7f;
     c.warpOffset[2] = m_swirl * 0.4f;
     c.detail = look.detail;
+    c.fineRange = m_noiseRedRange * 0.5f * std::fabs(look.detail) + 1e-4f;   // matches the fine octave's weight in Gas()
     c.scatter = 1.0f + 1.5f * m_buildUp + 0.8f * m_bass;
 
     // Events
