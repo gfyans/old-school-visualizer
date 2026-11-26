@@ -14,7 +14,7 @@ struct Settings {
     std::wstring audioDevice;   // endpoint ID; empty = follow the system default
     bool showBars = false;      // equaliser bars along the bottom
     bool albumColours = true;   // take palettes from the playing track's album art
-    bool trackTitles = true;    // show title/artist when a song starts
+    int onScreenText = 2;       // 0 none, 1 song titles only, 2 all (titles and notices)
     int sceneChanges = 0;       // 0 off, 1 a new visualiser with each song, 2 random scene and look about every minute
     bool instantReplay = false; // keep the last 30 s ready to save as a video
     std::wstring videoFolder;   // where recordings go (empty = Videos\Visualizer)
@@ -27,6 +27,7 @@ struct Settings {
     // Resolution each visualiser settled at under the GPU budget (name -> fraction of the window),
     // so the next run starts there instead of finding it again. Section [RenderScale], in percent.
     std::map<std::wstring, float> renderScales;
+    bool fullResolution = false;   // every scene at 100% instead of the variable resolution above
 
     void Load();
     void Save() const;

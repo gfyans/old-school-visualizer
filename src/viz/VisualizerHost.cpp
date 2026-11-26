@@ -175,8 +175,8 @@ void VisualizerHost::Update(const AudioFeatures& audio, float dt) {
 
 void VisualizerHost::ViewportSize(const Slot& slot, int& w, int& h) const {
     const int bw = slot.baseW > 0 ? slot.baseW : m_width, bh = slot.baseH > 0 ? slot.baseH : m_height;
-    w = std::max(1, static_cast<int>(std::lround(bw * slot.scale)));
-    h = std::max(1, static_cast<int>(std::lround(bh * slot.scale)));
+    w = std::max(1, static_cast<int>(std::lround(bw * Scale(slot))));
+    h = std::max(1, static_cast<int>(std::lround(bh * Scale(slot))));
 }
 
 int VisualizerHost::ActiveRenderWidth() const { int w, h; ViewportSize(m_slots[m_current], w, h); return w; }
@@ -194,6 +194,11 @@ void VisualizerHost::EnsureTarget(Slot& slot) {
 
 void VisualizerHost::AdaptScale(Slot& slot, float dt) {
     if (!slot.timer.HasValue()) return;
+    if (m_fullResolution) {   // not adapting: and a fresh start when variable resolution comes back
+        slot.longWindow.Clear();
+        slot.shortWindow.Clear();
+        return;
+    }
     const float ms = slot.timer.Milliseconds();
     for (Slot::Window* w : { &slot.longWindow, &slot.shortWindow }) {
         w->time += dt;

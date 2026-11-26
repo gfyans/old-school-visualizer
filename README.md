@@ -38,15 +38,19 @@ gradually, and big moments don't push it down. Press `F1` to see the resolution 
 
 ## Using it
 
-Right-click anywhere for the menu. Every setting is in there. Press `H` to see the main keys.
+Press `,` (or right-click › Settings…) for the settings window: on-screen text, monitors, stream mode, scene
+changes, filter, colours, audio device, recording and updates, all in one place. Right-click anywhere for the quick
+menu (visualiser, filter, music, recording). Press `H` to see the main keys.
 
 | Key | What it does |
 |---|---|
+| `,` | Settings |
 | `←` `→` | Previous / next visualiser |
 | `↑` `↓` | Play / pause, next track |
 | `N` | Next look |
 | `Q` | Set off the big moment now, without waiting for a drop |
 | `C` | Scene changes: off, one per song, or random |
+| `T` | On-screen text: all, song titles only, or none |
 | `F` | Fullscreen |
 | `R` | Record to MP4 |
 | `F12` | Screenshot |
@@ -57,7 +61,7 @@ until it picks the right one.
 
 ## Streaming with OBS
 
-Press `O` (or right-click › Display › Stream mode) to get the window ready for streaming. The on-screen text goes
+Press `O` (or Settings › Stream mode) to get the window ready for streaming. The on-screen text goes
 and the window becomes 1920 × 1080. There are four stream modes:
 
 * **Clean**: the visualiser, nothing else.

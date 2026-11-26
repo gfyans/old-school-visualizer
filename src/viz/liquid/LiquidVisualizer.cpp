@@ -317,11 +317,9 @@ bool LiquidVisualizer::OnKey(UINT vk) {
     switch (vk) {
     case 'N':
         m_look = (m_look + 1) % kLookCount;
-        m_message = kLooks[m_look];
         return true;
     case 'M':
         m_hue += 0.3f;
-        m_message = L"New colours";
         return true;
     case 'Q':
         Burst();

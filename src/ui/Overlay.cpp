@@ -8,9 +8,10 @@ namespace {
 // Layout is authored for a 1080p-high window and scaled to the real size.
 constexpr float kDesignHeight = 1080.0f;
 
-// The keys worth remembering; everything else is in the right-click menu, with its key alongside.
+// The keys worth remembering; quick actions are in the right-click menu, settings in their window.
 const wchar_t* const kHelpLines[][2] = {
-    { L"Right-click", L"The menu: every setting" },
+    { L",", L"Settings" },
+    { L"Right-click", L"Quick menu: visualiser, filter, music, record" },
     { L"\u2190  \u2192", L"Previous / next visualiser" },
     { L"\u2191  \u2193", L"Play / pause  /  next track (your music player)" },
     { L"C", L"Scene changes: off / each song / random" },
@@ -54,13 +55,15 @@ bool Overlay::CreateDeviceResources(ID2D1DeviceContext* ctx) {
 
 void Overlay::ReleaseDeviceResources() { m_brush.Reset(); }
 
-void Overlay::ShowMessage(const std::wstring& text, float seconds) {
+void Overlay::ShowMessage(const std::wstring& text, float seconds, bool always) {
+    if (m_textMode != kTextAll && !always) return;
     m_message = text;
     m_messageTime = 0.0f;
     m_messageDuration = seconds;
 }
 
 void Overlay::ShowTrack(const std::wstring& title, const std::wstring& artist, float seconds) {
+    if (m_textMode == kTextNone) return;
     m_trackTitle = title;
     m_trackArtist = artist;
     m_trackTime = 0.0f;

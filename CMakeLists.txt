@@ -102,6 +102,7 @@ add_executable(Visualizer WIN32
     src/render/GpuTimer.cpp
     src/audio/AudioCapture.cpp
     src/ui/Overlay.cpp
+    src/ui/SettingsWindow.cpp
     src/ui/EqBars.cpp
     src/viz/VisualizerHost.cpp
     src/filter/FilterHost.cpp

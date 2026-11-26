@@ -31,8 +31,13 @@ public:
     bool CreateDeviceResources(ID2D1DeviceContext* ctx);  // brushes
     void ReleaseDeviceResources();
 
-    void ShowMessage(const std::wstring& text, float seconds = 2.5f);
-    // Now-playing caption, shown for a few seconds when a song starts.
+    // What may appear unasked: 0 nothing, 1 song titles only, 2 titles and notices.
+    // The help and stats panels and the recording indicator aren't affected.
+    enum TextMode { kTextNone = 0, kTextSongs = 1, kTextAll = 2 };
+    void SetTextMode(int mode) { m_textMode = mode; }
+    // A notice; dropped unless the text mode is All (always = show it anyway, e.g. to confirm a change of mode).
+    void ShowMessage(const std::wstring& text, float seconds = 2.5f, bool always = false);
+    // Now-playing caption, shown for a few seconds when a song starts (unless the text mode is None).
     void ShowTrack(const std::wstring& title, const std::wstring& artist, float seconds = 7.0f);
     // A persistent status in the top-right corner (e.g. "REC 0:42"); empty hides it.
     void SetIndicator(const std::wstring& text, bool recording) { m_indicator = text; m_indicatorRec = recording; }
@@ -58,6 +63,7 @@ private:
     Microsoft::WRL::ComPtr<IDWriteTextFormat> m_trackFormat, m_artistFormat;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_brush;
 
+    int m_textMode = kTextAll;
     std::wstring m_helpName;
     std::vector<VisualizerAction> m_helpActions;
     std::wstring m_indicator;

@@ -509,11 +509,9 @@ bool GlassCityVisualizer::OnKey(UINT vk) {
     switch (vk) {
     case 'N':
         NextLook(false);
-        m_message = kLooks[m_look].name;
         return true;
     case 'M':
         PickShot();
-        m_message = kShots[m_shot];
         return true;
     case 'Q':
         m_fire = true;

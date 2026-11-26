@@ -437,7 +437,6 @@ void GalaxyVisualizer::Render(Renderer& renderer, float time, float dt) {
 bool GalaxyVisualizer::OnKey(UINT vk) {
     if (vk == 'N') {
         NextLook(2.5f);
-        m_message = m_hasArt && (m_scheme % 2 == 1) ? L"Album colours" : kPalettes[m_scheme].name;
         return true;
     }
     if (vk == 'Q') {   // fire the quasar, as on a drop
@@ -446,7 +445,6 @@ bool GalaxyVisualizer::OnKey(UINT vk) {
     }
     if (vk == 'M') {   // next camera shot
         NextShot(-1, true);
-        m_message = L"New shot";
         return true;
     }
     if (vk == VK_SPACE) {

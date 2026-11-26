@@ -283,7 +283,6 @@ bool NeonGridVisualizer::OnKey(UINT vk) {
     }
     if (vk == 'N') {
         NextScheme(1.2f);
-        m_message = m_hasArt && (m_scheme & 1) == 0 ? L"Album colours" : kSchemes[m_scheme].name;
         return true;
     }
     if (vk == VK_SPACE) {

@@ -298,17 +298,14 @@ bool SpectrumVisualizer::OnKey(UINT vk) {
     switch (vk) {
     case 'N':
         SetLook(m_look + 1);
-        m_message = kLooks[m_look];
         return true;
     case 'M':
         if (m_look == Studio) {
             m_shot = (m_shot + 1) % kShotCount;
             m_shotTime = 0.0f;
             m_beatsInShot = 0;
-            m_message = kShots[m_shot];
         } else {
             m_palette = (m_palette + 1) % kPaletteCount;
-            m_message = m_hasArt ? std::wstring(kPalettes[m_palette].name) + L" + album colours" : kPalettes[m_palette].name;
         }
         return true;
     case 'Q':   // fireworks, as on a drop

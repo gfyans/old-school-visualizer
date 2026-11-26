@@ -238,7 +238,6 @@ void FractalVisualizer::Render(Renderer& renderer, float, float) {
 bool FractalVisualizer::OnKey(UINT vk) {
     if (vk == 'N') {
         NextWorld(0.8f, false);
-        m_message = kWorldNames[m_world];
         return true;
     }
     if (vk == 'Q') {

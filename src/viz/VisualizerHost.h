@@ -51,7 +51,12 @@ public:
     void ShuffleExtras();         // new visualisers on the other monitors (e.g. on a new song)
 
     // Stats for the active visualiser.
-    float ActiveScale() const { return m_slots[m_current].scale; }
+    float ActiveScale() const { return Scale(m_slots[m_current]); }
+
+    // Full resolution: every scene drawn at 100%, whatever it costs (no adapting to the GPU budget).
+    // Off (the default): variable resolution. The scales learned so far are kept either way.
+    void SetFullResolution(bool on) { m_fullResolution = on; }
+    bool FullResolution() const { return m_fullResolution; }
     float ActiveGpuMs() const { return m_slots[m_current].timer.Milliseconds(); }
     int ActiveRenderWidth() const;
     int ActiveRenderHeight() const;
@@ -99,6 +104,7 @@ private:
     void AdaptScale(Slot& slot, float dt);
     float StartScale(const IVisualizer& viz) const { return m_scaleOverride > 0.0f ? m_scaleOverride : std::min(viz.RenderScale(), kMaxScale); }
     float MaxScale() const { return m_scaleOverride > 0.0f ? m_scaleOverride : kMaxScale; }
+    float Scale(const Slot& slot) const { return m_fullResolution ? MaxScale() : slot.scale; }   // what it's drawn at
     CompositeLayer LayerFor(const Slot& slot) const;
     void ViewportSize(const Slot& slot, int& w, int& h) const;
 
@@ -109,6 +115,7 @@ private:
     void SetBase(Slot& slot, const RECT* region);
     float m_gpuBudgetMs = kDefaultGpuBudgetMs;
     float m_scaleOverride = 0.0f;   // VISUALIZER_RENDER_SCALE (dev): pin every scene's start and limit, 0 = off
+    bool m_fullResolution = false;
     ID3D11Device* m_device = nullptr;
     int m_width = 1, m_height = 1;
     int m_current = 0;

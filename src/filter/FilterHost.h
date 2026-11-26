@@ -30,8 +30,6 @@ public:
     void Select(int index);   // -1 = off
     void Next();              // off -> first -> ... -> last -> off
     void SelectRandom(uint32_t seed);   // another filter Random mode may use (stays off if off)
-    // What to show on screen after a change: "Filter: VHS" or "Filter off".
-    std::wstring Message() const;
 
     void NewTrack();   // a new palette with each song
     void Update(const AudioFeatures& audio, float dt);

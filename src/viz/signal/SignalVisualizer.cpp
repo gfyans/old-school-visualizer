@@ -442,12 +442,10 @@ bool SignalVisualizer::OnKey(UINT vk) {
     }
     if (vk == 'N') {
         NextLook(true);
-        m_message = std::wstring(kSubjects[m_nextSubject]) + L"  ·  " + kStyles[m_style] + L"  ·  " + kPalettes[m_palette].name;
         return true;
     }
     if (vk == 'M') {
         SetLayout(m_rows == 0 ? std::uniform_int_distribution<int>(2, 4)(m_rng) : 0);
-        m_message = LayoutName(m_rows);
         return true;
     }
     if (vk == VK_SPACE) {

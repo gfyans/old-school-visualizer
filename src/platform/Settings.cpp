@@ -58,7 +58,8 @@ void Settings::Load() {
     if (displayMode < 0 || displayMode > 2) displayMode = 0;
     showBars = ReadInt(file, L"ShowBars", 0) != 0;
     albumColours = ReadInt(file, L"AlbumColours", 1) != 0;
-    trackTitles = ReadInt(file, L"TrackTitles", 1) != 0;
+    // OnScreenText replaced TrackTitles (1.16 and earlier: titles on = everything shown).
+    onScreenText = std::clamp(ReadInt(file, L"OnScreenText", ReadInt(file, L"TrackTitles", 1) != 0 ? 2 : 0), 0, 2);
     sceneChanges = std::clamp(ReadInt(file, L"AutoCycle", 0), 0, 2);
     instantReplay = ReadInt(file, L"InstantReplay", 0) != 0;
     moodColour = ReadInt(file, L"MoodColour", 1) != 0;
@@ -69,6 +70,7 @@ void Settings::Load() {
         if (old > 0 && old < static_cast<int>(ARRAYSIZE(kOld))) filter = kOld[old];
     }
     autoUpdate = ReadInt(file, L"AutoUpdate", 1) != 0;
+    fullResolution = ReadInt(file, L"FullResolution", 0) != 0;
     lastUpdateCheck = _wtoi64(ReadString(file, L"LastUpdateCheck").c_str());
 
     // [RenderScale]: "Name=percent" lines, double-null terminated.
@@ -101,13 +103,15 @@ void Settings::Save() const {
     WriteInt(file, L"DisplayMode", displayMode);
     WriteInt(file, L"ShowBars", showBars ? 1 : 0);
     WriteInt(file, L"AlbumColours", albumColours ? 1 : 0);
-    WriteInt(file, L"TrackTitles", trackTitles ? 1 : 0);
+    WriteInt(file, L"OnScreenText", onScreenText);
+    WritePrivateProfileStringW(kSection, L"TrackTitles", nullptr, file.c_str());   // replaced by OnScreenText
     WriteInt(file, L"AutoCycle", sceneChanges);
     WriteInt(file, L"InstantReplay", instantReplay ? 1 : 0);
     WriteInt(file, L"MoodColour", moodColour ? 1 : 0);
     WriteString(file, L"Filter", filter.empty() ? std::wstring(L"Off") : filter);
     WritePrivateProfileStringW(kSection, L"GlitchFilter", nullptr, file.c_str());   // replaced by Filter
     WriteInt(file, L"AutoUpdate", autoUpdate ? 1 : 0);
+    WriteInt(file, L"FullResolution", fullResolution ? 1 : 0);
     WriteString(file, L"LastUpdateCheck", std::to_wstring(lastUpdateCheck));
     for (const auto& [name, scale] : renderScales)
         WritePrivateProfileStringW(kScaleSection, name.c_str(), std::to_wstring(std::lround(scale * 100.0f)).c_str(), file.c_str());

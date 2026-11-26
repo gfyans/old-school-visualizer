@@ -343,11 +343,9 @@ bool DetonationVisualizer::OnKey(UINT vk) {
     switch (vk) {
     case 'N':
         m_look = (m_look + 1) % kLookCount;
-        m_message = kLooks[m_look];
         return true;
     case 'M':
         PickShot();
-        m_message = kShots[m_shot];
         return true;
     case 'Q':
         Detonate();

@@ -214,7 +214,6 @@ bool AuroraVisualizer::OnKey(UINT vk) {
     }
     if (vk == 'N') {
         NextScheme(2.5f);
-        m_message = m_hasArt && (m_scheme % 2 == 1) ? L"Album colours" : kSchemes[m_scheme].name;
         return true;
     }
     if (vk == VK_SPACE) {

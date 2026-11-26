@@ -9,6 +9,7 @@
 #include "render/Renderer.h"
 #include "ui/EqBars.h"
 #include "ui/Overlay.h"
+#include "ui/SettingsWindow.h"
 #include "update/Updater.h"
 #include "filter/FilterHost.h"
 #include "viz/VisualizerHost.h"
@@ -149,6 +150,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     if (const int saved = host.FindByName(settings.visualizer); saved > 0) host.Select(saved, false);
     else host.Active().Activate();
     host.RestoreScales(settings.renderScales);
+    host.SetFullResolution(settings.fullResolution);
 
     auto capture = std::make_unique<AudioCapture>();
     auto analyzer = std::make_unique<AudioAnalyzer>();
@@ -175,7 +177,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     // Now playing: title/artist captions and album-art palettes.
     NowPlaying nowPlaying;
     nowPlaying.Start();
-    bool albumColours = settings.albumColours, trackTitles = settings.trackTitles;
+    bool albumColours = settings.albumColours;
+    // On-screen text (T): none, song titles only, or titles and notices.
+    int onScreenText = settings.onScreenText;
+    overlay.SetTextMode(onScreenText);
+    static const wchar_t* kTextItems[] = { L"None", L"Song titles only", L"All" };
     TrackInfo track;
     uint32_t seenSerial = 0, seenTrack = 0, seenPalette = 0;
     auto applyPalette = [&](bool newTrack) {
@@ -326,7 +332,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         settings.audioDevice = capture->PreferredDevice();
         settings.showBars = eqBars.Visible();
         settings.albumColours = albumColours;
-        settings.trackTitles = trackTitles;
+        settings.onScreenText = onScreenText;
         settings.sceneChanges = sceneChanges;
         settings.instantReplay = recorder.InstantReplay();
         settings.videoFolder = videoFolder;
@@ -335,6 +341,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         settings.displayMode = displayMode;
         settings.monitor = fullscreenMonitor;
         settings.renderScales = host.LearnedScales();
+        settings.fullResolution = host.FullResolution();
         settings.Save();
     };
     window.onClose = saveSettings;   // while the window still exists
@@ -384,10 +391,153 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         window.SetTitle(streamMode ? (std::wstring(L"Stream mode: ") + kStreamItems[streamMode]).c_str() : kAppName);
         if (streamMode == kStreamOff) overlay.ShowMessage(L"Stream mode off", 1.5f);
     };
-    auto setAudioDevice = [&](const AudioDevice* device) {
-        capture->SetPreferredDevice(device ? device->id : std::wstring());
-        overlay.ShowMessage(device ? L"Audio: " + device->name : std::wstring(L"Audio: system default output"), 3.0f);
+    auto setTextMode = [&](int mode) {
+        onScreenText = mode;
+        overlay.SetTextMode(mode);
+        overlay.ClearTransient();
+        // Always confirmed (it's the one notice "None" lets through), with the song when titles are on.
+        overlay.ShowMessage(std::wstring(L"On-screen text: ") + kTextItems[mode], 2.0f, true);
+        if (mode != Overlay::kTextNone && !track.title.empty()) overlay.ShowTrack(track.title, track.artist);
     };
+    auto chooseVideoFolder = [&](HWND owner) {
+        const std::wstring chosen = Window::PickFolder(owner, L"Save videos to", recorder.OutputFolder());
+        if (chosen.empty()) return false;
+        videoFolder = chosen;
+        recorder.SetOutputFolder(videoFolder);
+        saveSettings();
+        return true;
+    };
+    std::wstring updateStatus;   // the updater's latest notice, shown in the settings window
+
+    // --- The settings window (, or right-click > Settings): everything you set and leave ---------
+    SettingsWindow settingsWindow;
+    {
+        using Item = SettingItem;
+        auto choice = [](std::wstring label, std::function<std::vector<std::wstring>()> options, std::function<int()> get,
+                         std::function<void(int)> set, std::function<bool()> enabled = {}) {
+            Item i; i.kind = Item::Choice; i.label = std::move(label); i.options = std::move(options);
+            i.get = std::move(get); i.set = std::move(set); i.enabled = std::move(enabled); return i;
+        };
+        auto fixed = [](std::initializer_list<const wchar_t*> list) {
+            std::vector<std::wstring> v(list.begin(), list.end());
+            return [v] { return v; };
+        };
+        auto toggle = [](std::wstring label, std::function<int()> get, std::function<void(int)> set, std::function<bool()> enabled = {}) {
+            Item i; i.kind = Item::Toggle; i.label = std::move(label); i.get = std::move(get); i.set = std::move(set);
+            i.enabled = std::move(enabled); return i;
+        };
+        auto action = [](std::function<std::wstring()> text, std::function<std::wstring()> button, std::function<void(int)> press,
+                         std::function<bool()> enabled = {}) {
+            Item i; i.kind = Item::Action; i.text = std::move(text); i.button = std::move(button); i.set = std::move(press);
+            i.enabled = std::move(enabled); return i;
+        };
+        auto multiMonitor = [] { return Window::Monitors().size() >= 2; };
+        // Lists the window shows by position; kept here so a choice maps back to the right entry.
+        auto monitorNames = std::make_shared<std::vector<std::wstring>>();
+        auto deviceIds = std::make_shared<std::vector<std::wstring>>();
+
+        std::vector<Item> items;
+        items.push_back(Item::MakeHeading(L"Display"));
+        items.push_back(choice(L"On-screen text", fixed({ L"All: song titles and notices", L"Song titles only", L"None" }),
+            [&] { return 2 - onScreenText; }, [&](int i) { setTextMode(2 - i); }));
+        items.push_back(choice(L"Fullscreen across",
+            fixed({ L"One monitor", L"Every monitor, each its own visualiser", L"Every monitor, one visualiser spanning" }),
+            [&] { return displayMode; },
+            [&](int i) { displayMode = i; applyDisplay(); }, multiMonitor));
+        items.push_back(choice(L"Fullscreen on",
+            [monitorNames] {
+                const std::vector<MonitorDesc> monitors = Window::Monitors();
+                monitorNames->clear();
+                std::vector<std::wstring> labels{ L"The monitor the window is on" };
+                for (size_t m = 0; m < monitors.size(); ++m) {
+                    monitorNames->push_back(monitors[m].name);
+                    labels.push_back(L"Monitor " + std::to_wstring(m + 1) + (monitors[m].primary ? L" (main)" : L""));
+                }
+                return labels;
+            },
+            [&, monitorNames] {
+                for (size_t m = 0; m < monitorNames->size(); ++m) if ((*monitorNames)[m] == fullscreenMonitor) return static_cast<int>(m) + 1;
+                return 0;
+            },
+            [&, monitorNames](int i) {
+                fullscreenMonitor = i > 0 && i - 1 < static_cast<int>(monitorNames->size()) ? (*monitorNames)[i - 1] : std::wstring();
+                applyDisplay();
+            },
+            [&, multiMonitor] { return multiMonitor() && displayMode == 0; }));
+        items.push_back(choice(L"Resolution",
+            fixed({ L"Variable: as sharp as the GPU keeps smooth", L"Full: every scene at 100%" }),
+            [&] { return host.FullResolution() ? 1 : 0; }, [&](int i) { host.SetFullResolution(i == 1); }));
+        items.push_back(choice(L"Stream mode", [] { return std::vector<std::wstring>(std::begin(kStreamItems), std::end(kStreamItems)); },
+            [&] { return streamMode; }, [&](int i) { setStreamMode(i); }));
+
+        items.push_back(Item::MakeHeading(L"Picture"));
+        items.push_back(choice(L"Scene changes", fixed({ L"Off", L"A new visualiser with each song", L"Random: a new scene every minute or so" }),
+            [&] { return sceneChanges; }, [&](int i) { setSceneChanges(i); }));
+        items.push_back(choice(L"Filter",
+            [&] {
+                std::vector<std::wstring> v{ L"Off" };
+                for (int f = 0; f < filters.Count(); ++f) v.push_back(filters.At(f).Name());
+                return v;
+            },
+            [&] { return filters.Active() ? filters.Current() + 1 : 0; }, [&](int i) { filters.Select(i - 1); }));
+        items.push_back(toggle(L"Equaliser bars along the bottom", [&] { return eqBars.Visible() ? 1 : 0; },
+            [&](int on) { eqBars.SetVisible(on != 0); }, [&] { return !barsOnly(); }));
+        items.push_back(toggle(L"Mood colour: warmer and cooler with the music", [&] { return moodColour ? 1 : 0; },
+            [&](int on) { moodColour = on != 0; }));
+        items.push_back(toggle(L"Colours from the album art", [&] { return albumColours ? 1 : 0; },
+            [&](int on) { albumColours = on != 0; applyPalette(false); }));
+
+        items.push_back(Item::MakeColumn());
+        items.push_back(Item::MakeHeading(L"Audio"));
+        items.push_back(choice(L"Listen to",
+            [&, deviceIds] {
+                const std::vector<AudioDevice> devices = AudioCapture::ListOutputDevices();
+                deviceIds->clear();
+                std::vector<std::wstring> labels{ L"The system's default output" };
+                for (const AudioDevice& d : devices) { deviceIds->push_back(d.id); labels.push_back(d.name); }
+                return labels;
+            },
+            [&, deviceIds] {
+                const std::wstring current = capture->PreferredDevice();
+                for (size_t d = 0; d < deviceIds->size(); ++d) if ((*deviceIds)[d] == current) return static_cast<int>(d) + 1;
+                return 0;
+            },
+            [&, deviceIds](int i) {
+                capture->SetPreferredDevice(i > 0 && i - 1 < static_cast<int>(deviceIds->size()) ? (*deviceIds)[i - 1] : std::wstring());
+            }));
+
+        items.push_back(Item::MakeHeading(L"Recording"));
+        items.push_back(toggle(L"Instant replay: keep the last 30 seconds (S saves)", [&] { return recorder.InstantReplay() ? 1 : 0; },
+            [&](int on) { recorder.SetInstantReplay(on != 0); }, [&] { return canRecord; }));
+        items.push_back(action(
+            [&] { return canRecord ? L"Videos go to " + Recorder::ShortPath(recorder.OutputFolder(), 40) : std::wstring(L"Recording isn't available on this PC"); },
+            [] { return std::wstring(L"Change…"); },
+            [&](int) { chooseVideoFolder(settingsWindow.Handle()); }, [&] { return canRecord; }));
+
+        items.push_back(Item::MakeHeading(L"Updates"));
+        items.push_back(toggle(L"Check for updates and install them on exit", [&] { return settings.autoUpdate ? 1 : 0; },
+            [&](int on) { settings.autoUpdate = on != 0; }));
+        items.push_back(action(
+            [&] {
+                if (updater.Ready()) return L"Version " + updater.ReadyVersion() + L" is ready";
+                if (!updateStatus.empty()) return updateStatus;
+                return std::wstring(L"This is version ") + Updater::CurrentVersion();
+            },
+            [&] { return std::wstring(updater.Ready() ? L"Restart now" : L"Check now"); },
+            [&](int) {
+                if (updater.Ready()) {
+                    saveSettings();
+                    if (updater.RestartNow()) window.Close();
+                    else updateStatus = L"Couldn't install the update";
+                } else {
+                    settings.lastUpdateCheck = updater.Start(settings.lastUpdateCheck, true);
+                    updateStatus = L"Checking for updates…";
+                }
+            }));
+        settingsWindow.SetItems(std::move(items));
+    }
+    settingsWindow.onHidden = saveSettings;
+    auto openSettings = [&] { settingsWindow.Show(window.Handle()); };
     window.onKeyDown = [&](UINT vk) {
         switch (vk) {
         case 'F':        window.ToggleFullscreen(); break;
@@ -426,8 +576,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             }
             break;
         case 'X':
-            filters.Next();
-            overlay.ShowMessage(filters.Message(), 1.5f);
+            filters.Next();   // no name on screen: it's ticked in the menu
             break;
         case 'K':
             moodColour = !moodColour;
@@ -451,28 +600,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             if (!canRecord) { overlay.ShowMessage(L"Recording isn't available on this PC", 2.5f); break; }
             const bool wasFullscreen = window.IsFullscreen();
             if (wasFullscreen) window.SetFullscreen(false);   // so the dialog isn't hidden behind
-            const std::wstring chosen = Window::PickFolder(window.Handle(), L"Save videos to", recorder.OutputFolder());
+            chooseVideoFolder(window.Handle());
             if (wasFullscreen) window.SetFullscreen(true);
-            if (!chosen.empty()) {
-                videoFolder = chosen;
-                recorder.SetOutputFolder(videoFolder);
-                saveSettings();
-            }
             overlay.ShowMessage(L"Videos are saved to " + Recorder::ShortPath(recorder.OutputFolder()), 4.0f);
             break;
         }
         case 'T':
-            trackTitles = !trackTitles;
-            if (trackTitles && !track.title.empty()) overlay.ShowTrack(track.title, track.artist);
-            else overlay.ShowMessage(L"Track titles off", 1.5f);
+            setTextMode((onScreenText + 2) % 3);   // All -> Song titles only -> None -> All
             break;
+        case VK_OEM_COMMA: openSettings(); break;
         default:         host.Active().OnKey(vk); break;
         }
+        settingsWindow.Refresh();   // if it's open, show what the key changed
     };
 
-    // --- The right-click menu: every setting, with its key alongside -------------------------
+    // --- The right-click menu: quick actions, with their keys alongside (settings are in their window) ---
     window.onContextMenu = [&](POINT at) {
-        enum : UINT { kViz = 1000, kScene = 1100, kFilter = 1200, kDevice = 1300, kDisplay = 1400, kStream = 1500, kPrevTrack = 1600 };
+        enum : UINT { kViz = 1000, kFilter = 1200, kPrevTrack = 1600, kSettings = 1700 };
         auto keyName = [](UINT vk) -> std::wstring {
             switch (vk) {
             case VK_SPACE: return L"Space";
@@ -483,6 +627,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             case VK_F1: return L"F1";
             case VK_F12: return L"F12";
             case VK_ESCAPE: return L"Esc";
+            case VK_OEM_COMMA: return L",";
             default: return std::wstring(1, static_cast<wchar_t>(vk));
             }
         };
@@ -498,6 +643,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         auto sep = [](HMENU m) { AppendMenuW(m, MF_SEPARATOR, 0, nullptr); };
 
         HMENU menu = CreatePopupMenu();
+        item(menu, kSettings, L"Settings…", VK_OEM_COMMA);
+        SetMenuDefaultItem(menu, kSettings, FALSE);   // bold: the way in to everything else
+        sep(menu);
+
         HMENU vizMenu = CreatePopupMenu();
         for (int i = 0; i < host.Count(); ++i) radio(vizMenu, kViz + i, host.At(i).Name(), i == host.Current());
         sep(vizMenu);
@@ -508,12 +657,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         HMENU filterMenu = CreatePopupMenu();
         radio(filterMenu, kFilter, L"Off", !filters.Active());
         for (int i = 0; i < filters.Count() && i < 99; ++i) radio(filterMenu, kFilter + 1 + i, filters.At(i).Name(), i == filters.Current());
-        sub(menu, filterMenu, L"Filter\tX");
-
-        HMENU sceneMenu = CreatePopupMenu();
-        static const wchar_t* kSceneItems[] = { L"Off", L"A new visualiser with each song", L"Random: a new scene and look every minute or so" };
-        for (int i = 0; i < 3; ++i) radio(sceneMenu, kScene + i, kSceneItems[i], i == sceneChanges);
-        sub(menu, sceneMenu, L"Scene changes\tC");
+        sub(menu, filterMenu, L"Filter	X");
 
         HMENU music = CreatePopupMenu();
         item(music, VK_UP, L"Play / pause", VK_UP);
@@ -529,42 +673,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         }
         sep(menu);
 
-        HMENU effects = CreatePopupMenu();
-        item(effects, 'B', L"Equaliser bars", 'B', eqBars.Visible());
-        item(effects, 'K', L"Mood colour", 'K', moodColour);
-        item(effects, 'A', L"Album-art colours", 'A', albumColours);
-        item(effects, 'T', L"Track titles", 'T', trackTitles);
-        sub(menu, effects, L"Effects");
-
-        HMENU display = CreatePopupMenu();
-        item(display, 'F', L"Fullscreen", 'F', window.IsFullscreen());
-        const bool multi = Window::Monitors().size() >= 2;
-        sep(display);
-        static const wchar_t* kDisplayItems[] = { L"One monitor", L"A different visualiser on each monitor", L"Spanning every monitor" };
-        for (int i = 0; i < 3; ++i) {
-            radio(display, kDisplay + i, kDisplayItems[i], multi && i == displayMode);
-            if (!multi) EnableMenuItem(display, kDisplay + i, MF_BYCOMMAND | MF_GRAYED);
-        }
-        item(display, 'G', L"Next monitor", 'G', false, multi);
-        sep(display);
-        HMENU stream = CreatePopupMenu();
-        for (int i = 0; i < kStreamModes; ++i) radio(stream, kStream + i, kStreamItems[i], i == streamMode);
-        sub(display, stream, L"Stream mode\tO");
-        sub(menu, display, L"Display");
-
-        HMENU audioMenu = CreatePopupMenu();
-        const std::vector<AudioDevice> devices = AudioCapture::ListOutputDevices();
-        const std::wstring current = capture->PreferredDevice();
-        radio(audioMenu, kDevice, L"System default", current.empty());
-        for (int i = 0; i < static_cast<int>(devices.size()) && i < 90; ++i)
-            radio(audioMenu, kDevice + 1 + i, devices[i].name, devices[i].id == current);
-        sub(menu, audioMenu, L"Audio device\tD");
-
+        item(menu, 'F', L"Fullscreen", 'F', window.IsFullscreen());
         HMENU record = CreatePopupMenu();
         item(record, 'R', recorder.Recording() ? L"Stop and save the recording" : L"Record", 'R', false, canRecord);
-        item(record, 'I', L"Instant replay", 'I', recorder.InstantReplay(), canRecord);
         item(record, 'S', L"Save the last 30 seconds", 'S', false, canRecord && recorder.InstantReplay());
-        item(record, 'V', L"Video folder\u2026", 'V', false, canRecord);
         sep(record);
         item(record, VK_F12, L"Save a screenshot", VK_F12);
         sub(menu, record, L"Record");
@@ -572,7 +684,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
 
         item(menu, VK_F1, L"Stats", VK_F1, showStats);
         item(menu, 'H', L"Help", 'H', showHelp);
-        item(menu, 'U', updater.Ready() ? L"Restart to update" : L"Check for updates", 'U');
+        if (updater.Ready()) item(menu, 'U', L"Restart to update", 'U');
         sep(menu);
         item(menu, 1, window.IsFullscreen() ? L"Leave fullscreen" : L"Quit", VK_ESCAPE);
 
@@ -582,11 +694,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         if (cmd == 0) return;
         if (cmd == 1) window.onKeyDown(VK_ESCAPE);
         else if (cmd == kPrevTrack) { nowPlaying.Send(NowPlaying::Command::Previous); overlay.ShowMessage(L"Previous track", 1.2f); }
-        else if (cmd >= kStream && cmd < kStream + static_cast<UINT>(kStreamModes)) setStreamMode(cmd - kStream);
-        else if (cmd >= kDisplay && cmd < kDisplay + 3) setDisplayMode(cmd - kDisplay);
-        else if (cmd >= kDevice && cmd < kDevice + 100) setAudioDevice(cmd == kDevice ? nullptr : &devices[cmd - kDevice - 1]);
-        else if (cmd >= kFilter && cmd < kFilter + 100) { filters.Select(static_cast<int>(cmd - kFilter) - 1); overlay.ShowMessage(filters.Message(), 1.5f); }
-        else if (cmd >= kScene && cmd < kScene + 3) setSceneChanges(cmd - kScene);
+        else if (cmd == kSettings) openSettings();
+        else if (cmd >= kFilter && cmd < kFilter + 100) filters.Select(static_cast<int>(cmd - kFilter) - 1);
         else if (cmd >= kViz && cmd < kViz + 100) { if (static_cast<int>(cmd - kViz) != host.Current()) { host.Select(cmd - kViz); announce(); } }
         else window.onKeyDown(cmd);   // everything else is the key it's labelled with
     };
@@ -607,7 +716,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
     };
     updateMonitor();
 
-    overlay.ShowMessage(L"Right-click for the menu, H for help", 4.0f);
+    overlay.ShowMessage(L"Right-click for the menu and settings, H for help", 4.0f);
     if (justUpdated) overlay.ShowMessage(std::wstring(L"Updated to version ") + Updater::CurrentVersion(), 4.0f);
     if (settings.autoUpdate) settings.lastUpdateCheck = updater.Start(settings.lastUpdateCheck, false);
 
@@ -621,6 +730,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         bool quit = false;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT) { quit = true; break; }
+            if (settingsWindow.HandleDialogMessage(msg)) continue;   // Tab, Esc etc. in the settings window
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
@@ -667,7 +777,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             const bool newPalette = track.paletteSerial != seenPalette;
             seenTrack = track.trackSerial;
             seenPalette = track.paletteSerial;
-            if (newTrack && trackTitles) overlay.ShowTrack(track.title, track.artist);
+            if (newTrack) overlay.ShowTrack(track.title, track.artist);   // the overlay drops it if text is off
             if (newTrack) filters.NewTrack();
             if (newTrack || newPalette) applyPalette(newTrack);
             // Auto-cycle: a new visualiser with each new song (not for the song already
@@ -738,7 +848,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         // Likewise the screenshot (a transparent window's waits for its alpha, below, and keeps it).
         if (screenshotPending && !window.IsTransparent()) takeScreenshot(false);
         if (std::wstring note = recorder.TakeMessage(); !note.empty()) overlay.ShowMessage(note, 4.0f);
-        if (std::wstring note = updater.TakeMessage(); !note.empty()) overlay.ShowMessage(note, 4.0f);
+        if (std::wstring note = updater.TakeMessage(); !note.empty()) { overlay.ShowMessage(note, 4.0f); updateStatus = note; }
         if (nowPlaying.TakeNoPlayer()) overlay.ShowMessage(L"No music player to control", 2.5f);
         if (recorder.Recording()) {
             const int secs = static_cast<int>(recorder.RecordingSeconds());
@@ -827,6 +937,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
         statsTimer += dt;
         if (statsTimer >= 1.0f) {
             updateMonitor();
+            settingsWindow.Refresh();   // Random mode changes the filter on its own; updates report in
             fps = frames;
             frames = 0;
             statsTimer = 0.0f;

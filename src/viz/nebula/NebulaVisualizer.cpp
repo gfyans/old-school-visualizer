@@ -611,7 +611,6 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
 bool NebulaVisualizer::OnKey(UINT vk) {
     if (vk == 'N') {
         NextLook();
-        m_message = std::wstring(kPalettes[m_paletteIndex].name) + L"  ·  " + kShapes[m_shapeIndex].name;
         return true;
     }
     if (vk == 'Q') {   // supernova, as on a drop

@@ -337,7 +337,6 @@ bool ScopeVisualizer::OnKey(UINT vk) {
     }
     if (vk == 'N') {
         m_mode = (m_mode + 1) % kModeCount;
-        m_message = kModeNames[m_mode];
         return true;
     }
     if (vk == VK_SPACE) {

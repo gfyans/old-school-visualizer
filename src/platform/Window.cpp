@@ -64,6 +64,13 @@ bool Window::Recreate(bool transparent) {
     }
     ShowWindow(created, m_fullscreen ? SW_SHOW : placement.showCmd);
     SetForegroundWindow(created);
+    // Windows the old one owned (the settings window) would be destroyed with it: hand them over.
+    struct Handover { HWND from, to; } handover{ old, created };
+    EnumThreadWindows(GetCurrentThreadId(), [](HWND h, LPARAM lp) -> BOOL {
+        const auto* ho = reinterpret_cast<const Handover*>(lp);
+        if (GetWindow(h, GW_OWNER) == ho->from) SetWindowLongPtrW(h, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(ho->to));
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&handover));
     DestroyWindow(old);
     return true;
 }

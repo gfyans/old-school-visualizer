@@ -444,13 +444,11 @@ void DotsVisualizer::Render(Renderer& renderer, float time, float dt) {
 bool DotsVisualizer::OnKey(UINT vk) {
     if (vk == 'N') {
         NextColours(2.0f);
-        m_message = m_hasArt && m_scheme % 2 == 1 ? L"Album colours" : kPalettes[m_scheme].name;
         return true;
     }
     if (vk == 'M') {
         if (m_splashT >= 0.0f) return true;
         NextLayout(2.5f);
-        m_message = kLayouts[m_layoutB];
         return true;
     }
     if (vk == 'Q') {   // the next big hit (they alternate: splash, breach)

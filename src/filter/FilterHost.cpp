@@ -80,10 +80,6 @@ void FilterHost::SelectRandom(uint32_t seed) {
     if (!pool.empty()) Select(pool[seed % pool.size()]);
 }
 
-std::wstring FilterHost::Message() const {
-    return Active() ? std::wstring(L"Filter: ") + CurrentName() : std::wstring(L"Filter off");
-}
-
 void FilterHost::NewTrack() {
     m_palette = (m_palette + 1) % kPaletteCount;
 }
