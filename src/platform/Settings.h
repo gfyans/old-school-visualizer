@@ -27,7 +27,7 @@ struct Settings {
     // Resolution each visualiser settled at under the GPU budget (name -> fraction of the window),
     // so the next run starts there instead of finding it again. Section [RenderScale], in percent.
     std::map<std::wstring, float> renderScales;
-    bool fullResolution = false;   // every scene at 100% instead of the variable resolution above
+    bool fullResolution = false;   // every scene at its highest scale (see MaxRenderScale) instead of the variable resolution above
 
     void Load();
     void Save() const;

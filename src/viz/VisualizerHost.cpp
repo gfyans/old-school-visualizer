@@ -184,7 +184,7 @@ int VisualizerHost::ActiveRenderHeight() const { int w, h; ViewportSize(m_slots[
 
 void VisualizerHost::EnsureTarget(Slot& slot) {
     // Allocate at the highest scale it may reach; variable resolution renders into a sub-rectangle.
-    const float max = MaxScale();
+    const float max = MaxScale(*slot.viz);
     const int bw = slot.baseW > 0 ? slot.baseW : m_width, bh = slot.baseH > 0 ? slot.baseH : m_height;
     const int w = std::max(1, static_cast<int>(std::lround(bw * max)));
     const int h = std::max(1, static_cast<int>(std::lround(bh * max)));
@@ -205,7 +205,7 @@ void VisualizerHost::AdaptScale(Slot& slot, float dt) {
         w->sumMs += ms;
         ++w->frames;
     }
-    const float hi = MaxScale();
+    const float hi = MaxScale(*slot.viz);
     const float lo = std::min(kMinScale, hi);
     auto step = [&](float factor) {
         slot.scale = std::clamp(slot.scale * factor, lo, hi);
@@ -234,7 +234,8 @@ void VisualizerHost::RestoreScales(const std::map<std::wstring, float>& scales) 
     for (Slot& s : m_slots) {
         const auto it = scales.find(s.viz->Name());
         if (it == scales.end()) continue;
-        s.scale = std::clamp(it->second, kMinScale, kMaxScale);
+        const float hi = MaxScale(*s.viz);   // a scale saved before the scene was capped comes down to the cap
+        s.scale = std::clamp(it->second, std::min(kMinScale, hi), hi);
         s.judged = true;
     }
 }

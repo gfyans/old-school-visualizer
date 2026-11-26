@@ -28,6 +28,7 @@ public:
     bool CreateResources(ID3D11Device* device) override;
     void ReleaseResources() override;
     float RenderScale() const override { return 0.75f; }   // TAA jitter recovers sub-pixel detail
+    float MaxRenderScale() const override { return 0.75f; }   // wispy gas: more pixels don't show; the time goes to the events
     void Activate() override;
     void Update(const AudioFeatures& audio, float dt) override;
     void Render(Renderer& renderer, float time, float dt) override;

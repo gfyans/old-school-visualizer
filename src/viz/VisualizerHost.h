@@ -53,7 +53,8 @@ public:
     // Stats for the active visualiser.
     float ActiveScale() const { return Scale(m_slots[m_current]); }
 
-    // Full resolution: every scene drawn at 100%, whatever it costs (no adapting to the GPU budget).
+    // Full resolution: every scene drawn at its highest scale (100% unless it sets a lower
+    // MaxRenderScale), whatever it costs (no adapting to the GPU budget).
     // Off (the default): variable resolution. The scales learned so far are kept either way.
     void SetFullResolution(bool on) { m_fullResolution = on; }
     bool FullResolution() const { return m_fullResolution; }
@@ -102,9 +103,10 @@ private:
     void EnsureTarget(Slot& slot);
     void RenderSlot(Slot& slot, Renderer& renderer, float time, float dt);
     void AdaptScale(Slot& slot, float dt);
-    float StartScale(const IVisualizer& viz) const { return m_scaleOverride > 0.0f ? m_scaleOverride : std::min(viz.RenderScale(), kMaxScale); }
-    float MaxScale() const { return m_scaleOverride > 0.0f ? m_scaleOverride : kMaxScale; }
-    float Scale(const Slot& slot) const { return m_fullResolution ? MaxScale() : slot.scale; }   // what it's drawn at
+    // The dev override (VISUALIZER_RENDER_SCALE) pins every scene, its own cap included.
+    float MaxScale(const IVisualizer& viz) const { return m_scaleOverride > 0.0f ? m_scaleOverride : std::min(viz.MaxRenderScale(), kMaxScale); }
+    float StartScale(const IVisualizer& viz) const { return m_scaleOverride > 0.0f ? m_scaleOverride : std::min(viz.RenderScale(), MaxScale(viz)); }
+    float Scale(const Slot& slot) const { return m_fullResolution ? MaxScale(*slot.viz) : slot.scale; }   // what it's drawn at
     CompositeLayer LayerFor(const Slot& slot) const;
     void ViewportSize(const Slot& slot, int& w, int& h) const;
 

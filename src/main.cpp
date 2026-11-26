@@ -465,7 +465,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int) {
             },
             [&, multiMonitor] { return multiMonitor() && displayMode == 0; }));
         items.push_back(choice(L"Resolution",
-            fixed({ L"Variable: as sharp as the GPU keeps smooth", L"Full: every scene at 100%" }),
+            fixed({ L"Variable: as sharp as the GPU keeps smooth", L"Full: every scene at its sharpest" }),
             [&] { return host.FullResolution() ? 1 : 0; }, [&](int i) { host.SetFullResolution(i == 1); }));
         items.push_back(choice(L"Stream mode", [] { return std::vector<std::wstring>(std::begin(kStreamItems), std::end(kStreamItems)); },
             [&] { return streamMode; }, [&](int i) { setStreamMode(i); }));

@@ -18,7 +18,10 @@ Create `src/viz/<name>/<Name>Visualizer.h` and `.cpp`. You need to implement:
 
 There are optional ones too:
 
-* `RenderScale()`: render at a lower resolution (e.g. `0.5`) if the look is soft anyway.
+* `RenderScale()`: the resolution to start at (e.g. `0.75`) if it's heavy; variable resolution then finds what
+  the GPU can sustain.
+* `MaxRenderScale()`: never draw above this (e.g. `0.75`), even with Full resolution, if the look is soft enough
+  that more pixels don't show.
 * `OnKey(vk)` and `Actions()`: handle keys like `N`, `M` and `Q`, and list them so they show up in the menu and the
   help screen.
 * `Randomise(seed)` and `Busy()`: used by Random mode. `Busy()` returning true stops it switching away in the middle

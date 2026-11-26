@@ -34,6 +34,11 @@ public:
     // labour for their first half minute.
     virtual float RenderScale() const { return 1.0f; }
 
+    // The highest internal resolution it's ever drawn at, as a fraction of the window: variable
+    // resolution never goes above it, and Full resolution draws it there. For scenes so soft that
+    // more pixels don't show (the GPU time is better spent on the effects).
+    virtual float MaxRenderScale() const { return 1.0f; }
+
     // Called when it becomes the visible visualiser.
     virtual void Activate() {}
 
