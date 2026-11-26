@@ -11,6 +11,7 @@ cbuffer Post : register(b3) {   // matches PostConstants in NebulaVisualizer.cpp
     float2 pulsarScreen; float pulsarFlare;  float starFlare;   // pulsar position (uv) and flare; build-up star's glow
     float3 pulsarFlareCol; float postPad;
     float3 starFlareCol;   float postPad2;
+    float pulsarSwell;  float shockRing;  float shockImpact;  float postPad3;   // lighthouse flash; the shock's edge (screen radius) and its impact
 };
 
 Texture2D Image : register(t0);        // resolved display image, with mips
@@ -28,7 +29,18 @@ float3 SoftMip(float2 uv, int m) {
 }
 
 float4 main(VSOut i) : SV_Target {
+    float aspect = iResolution.x / iResolution.y;
+    float2 vis = Visibility.Load(int3(0, 0, 0)).rg;
     float3 col = Image.SampleLevel(Linear, i.uv, 0).rgb;
+
+    // The shock sweeping over us: a short zoom blur out from the blast (streaks racing outward).
+    if (shockImpact > 0.01) {
+        float2 centre = all(abs(snScreen - 0.5) < 0.6) ? snScreen : 0.5;
+        float2 toCentre = centre - i.uv;
+        float3 streak = col;
+        [unroll] for (int k = 1; k <= 6; ++k) streak += Image.SampleLevel(Linear, i.uv + toCentre * (0.012 * k * shockImpact), 0).rgb;
+        col = lerp(col, streak / 7.0, saturate(shockImpact * 1.5));
+    }
 
     // Bloom: only what's brighter than a threshold spreads (bright gas everywhere would
     // otherwise wash the whole image out).
@@ -39,9 +51,6 @@ float4 main(VSOut i) : SV_Target {
         b += over * over * (m <= 2 ? 0.8 : 1.2);
     }
     col += b * bloom;
-
-    float aspect = iResolution.x / iResolution.y;
-    float2 vis = Visibility.Load(int3(0, 0, 0)).rg;
 
     // Supernova lens flare. Gas in front dims it, but never hides a supernova completely.
     if (snFlare > 0.001) {
@@ -67,6 +76,25 @@ float4 main(VSOut i) : SV_Target {
         float diag = pow(abs(sin(2.0 * atan2(d.y, d.x))), 80.0) * exp(-r / 0.05) * 0.25;
         float glare = exp(-r / 0.012) * 0.6 + exp(-r / 0.07) * 0.08;
         col += pulsarFlareCol * (spikes + diag + glare) * pulsarFlare * vis.r;
+    }
+    // Lighthouse flash: as a beam sweeps across us on the downbeat, a soft glow spreads from the
+    // pulsar and the whole image lifts a little (eased in and out on the CPU: never a jolt).
+    if (pulsarSwell > 0.001) {
+        float r = length((i.uv - pulsarScreen) * float2(aspect, 1.0));
+        float lift = pulsarSwell * lerp(0.3, 1.0, vis.r);
+        col += pulsarFlareCol * lift * (exp(-r / 0.25) * 0.35 + 0.06);
+        col *= 1.0 + 0.25 * lift;
+    }
+
+    // The shock's edge racing out across the screen as the shell closes on us, then a brief,
+    // eased lift of the whole image as it passes over.
+    if (shockImpact > 0.01) {
+        float2 centre = all(abs(snScreen - 0.5) < 0.6) ? snScreen : 0.5;
+        float r = length((i.uv - centre) * float2(aspect, 1.0));
+        float width = 0.02 + 0.12 * min(shockRing, 2.0);
+        float edge = exp(-(r - shockRing) * (r - shockRing) / (width * width));
+        col += lerp(flareCol, float3(0.70, 0.86, 1.0), 0.6) * edge * shockImpact * 0.5;
+        col *= 1.0 + 0.2 * shockImpact;
     }
 
     col += flash;

@@ -37,6 +37,7 @@ cbuffer Nebula : register(b2) {   // matches NebulaConstants in NebulaVisualizer
     float fineRange;    float snStar;  float snPush;  float pulsarStar;   // fineRange: see Gas; snStar: progenitor / remnant brightness
     float3 pulsarAxis;  float pulsarWake;     // spin axis (beams sweep the plane across it); wake brightness
     float3 snStarCol;   float snStarSize;     // progenitor / remnant colour, and its halo's angular size
+    float pulsarSwirl;  float pulsarRing;  float2 nebulaPad2;   // how far the gas around the pulsar has wound (radians); its ring's brightness
 };
 
 Texture3D<float4> Noise : register(t0);
@@ -70,11 +71,26 @@ float3 Blast(float3 p, out float scale) {
     return moved;
 }
 
+// The pulsar's magnetic swirl: gas around it is wound about its spin axis, the inner gas
+// furthest, so clouds near it drag into spiral arms (sampled backwards: the gas has turned forwards).
+float3 Swirl(float3 p) {
+    float3 moved = p;
+    [branch] if (pulsarSwirl > 0.0) {
+        float3 pv = p - pulsarPos;
+        float h = dot(pv, pulsarAxis);
+        float3 radial = pv - pulsarAxis * h;
+        float ang = pulsarSwirl * exp(-dot(radial, radial) * 0.08) * exp(-h * h * 0.12);
+        float c = cos(ang), s = sin(ang);
+        moved = pulsarPos + pulsarAxis * h + radial * c - cross(pulsarAxis, radial) * s;
+    }
+    return moved;
+}
+
 // World space wraps every 64 units (all noise periods divide 64), so the
 // camera position can wrap without visible seams.
 void Gas(float3 p, out float density, out float dust, out float shade, out float glint) {
     float blastScale;
-    p = Blast(p, blastScale);
+    p = Swirl(Blast(p, blastScale));
     // Two levels of domain warping: broad swirls, then finer turbulence.
     float4 w = Noise.SampleLevel(Wrap, p / 64.0 + warpOffset, 0);
     float3 q = p + (float3(w.x, w.z, w.y) - 0.5) * warp;
@@ -102,7 +118,7 @@ void Gas(float3 p, out float density, out float dust, out float shade, out float
 // look-ahead: close enough to say whether gas lies between a point and the light.
 float GasLite(float3 p) {
     float blastScale;
-    p = Blast(p, blastScale);
+    p = Swirl(Blast(p, blastScale));
     float4 w = Noise.SampleLevel(Wrap, p / 64.0 + warpOffset, 0);
     float3 q = p + (float3(w.x, w.z, w.y) - 0.5) * warp;
     float4 a = Noise.SampleLevel(Wrap, q / 32.0, 0);
@@ -224,7 +240,7 @@ float4 main(VSOut i) : SV_Target {
 
         // Pulsar: two narrow beams from a spinning star, widening slightly with distance, and
         // behind them a wake: the plane they sweep stays lit for a moment after they pass.
-        float beam = 0, pulsarCore = 0, wake = 0;
+        float beam = 0, pulsarCore = 0, wake = 0, ring = 0;
         [branch] if (pulsarStrength > 0.0) {
             float3 pv = p - pulsarPos;
             float along = dot(pv, pulsarDir);
@@ -239,6 +255,8 @@ float4 main(VSOut i) : SV_Target {
             float behind = frac(-phi / 3.14159265) * 3.14159265;    // since either beam passed
             float thick = 0.3 + r * 0.06;
             wake = pulsarWake * exp(-behind * 1.6) * exp(-h * h / (thick * thick)) * exp(-r * 0.06) * saturate(r * 2.0);
+            // A thin glowing ring at its equator (in the plane the beams sweep).
+            ring = pulsarRing * exp(-((r - 1.4) * (r - 1.4) + h * h) / 0.12);
         }
 
         // Supernova: a blinding flash, then a shockwave shell that lights the gas as it passes.
@@ -275,7 +293,7 @@ float4 main(VSOut i) : SV_Target {
             // Rims: the thin, lit edges of clouds facing the core glow hot.
             emission += colHot * glow * lit * saturate(1.0 - density * 2.5) * density * 0.6;
             // Event light falling on the gas.
-            emission += pulsarCol * (beam * 1.3 + pulsarCore + wake * 0.9) * (0.05 + density);
+            emission += pulsarCol * (beam * 1.3 + pulsarCore + wake * 0.9 + ring) * (0.05 + density);
             emission += snCol * (snGlow + snShell * 1.6) * (0.05 + density);
             emission *= exp(-t * 0.035);   // distant gas recedes into darkness: depth
             float alphaGas = 1.0 - exp(-density * stepLen * absorb);
@@ -289,7 +307,7 @@ float4 main(VSOut i) : SV_Target {
         // Light scattered by thin dust between clouds: the core's halo and beams through the
         // gaps (gas in front has already cut the transmittance, which makes the rays).
         float3 scattered = lightColor * glow * glow * 0.012 * scatter
-                         + pulsarCol * (beam * 0.025 + pulsarCore * 0.02 + wake * 0.006)
+                         + pulsarCol * (beam * 0.025 + pulsarCore * 0.02 + wake * 0.006 + ring * 0.25)
                          + snCol * snGlow * 0.012;
         // The shockwave itself: a thin, ragged shell of hot gas, visible even where there's no
         // cloud to light. Blue-white at the leading edge, the look's hot colour behind it.

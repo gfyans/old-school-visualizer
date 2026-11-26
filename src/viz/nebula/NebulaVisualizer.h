@@ -128,7 +128,13 @@ private:
     float m_hyper = 0.0f;   // drop: rushing through the blast
 
     // Events (positions in the wrapped world; used relative to the camera)
-    struct Pulsar { bool active = false; double pos[3] = {}; float axisU[3] = {}, axisV[3] = {}; float spin = 0.0f, fade = 0.0f, age = 0.0f; };
+    struct Pulsar {
+        bool active = false, fromNova = false;   // fromNova: born from a supernova's remnant
+        double pos[3] = {};
+        float axisU[3] = {}, axisV[3] = {};       // the plane its beams sweep
+        float spin = 0.0f, fade = 0.0f, age = 0.0f;
+        float swell = 0.0f;                       // eased glow as a beam crosses us on the downbeat
+    };
     struct Supernova { bool active = false; double pos[3] = {}; float age = 0.0f; };
     // The supernova's progenitor, charging through a build-up; held at a fixed place in the view
     // (offset: ahead, right, up) until the drop.
@@ -137,8 +143,9 @@ private:
     Supernova m_nova;
     Star m_star;
     float m_manualCharge = -1.0f;   // Q: seconds into a hand-triggered charge, -1 = none
+    bool m_novaPulsarDone = false;   // this supernova's remnant has already spun up into a pulsar
     float m_intensity = 0.0f;
-    void SpawnPulsar();
+    void SpawnPulsar(const double* at = nullptr);   // at: a world position (else ahead, off the flight path)
     void Relative(const double world[3], float out[3]) const;   // world point minus the camera, the short way round
 
     std::wstring m_message;

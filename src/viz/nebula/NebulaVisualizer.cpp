@@ -38,6 +38,7 @@ struct NebulaConstants {   // matches cbuffer Nebula in nebula_ps.hlsl
     float fineRange;     float snStar;  float snPush;  float pulsarStar;
     float pulsarAxis[3]; float pulsarWake;
     float snStarCol[3];  float snStarSize;
+    float pulsarSwirl;   float pulsarRing;  float pad2[2];
 };
 static_assert(sizeof(NebulaConstants) % 16 == 0);
 
@@ -55,6 +56,7 @@ struct PostConstants {   // matches cbuffer Post in nebula_post_ps.hlsl
     float pulsarScreen[2]; float pulsarFlare; float starFlare;
     float pulsarFlareCol[3]; float pad0;
     float starFlareCol[3]; float pad1;
+    float pulsarSwell; float shockRing; float shockImpact; float pad3;
 };
 static_assert(sizeof(PostConstants) % 16 == 0);
 
@@ -299,16 +301,22 @@ void NebulaVisualizer::Relative(const double world[3], float out[3]) const {
 }
 
 // A pulsar appears ahead and just off the flight path, so the flight sweeps close past it,
-// its beams wheeling around the camera.
-void NebulaVisualizer::SpawnPulsar() {
+// its beams wheeling around the camera (or, born from a supernova, where the remnant is).
+void NebulaVisualizer::SpawnPulsar(const double* at) {
     const float* right = m_basis[0];
     const float* up = m_basis[1];
     const float* fwd = m_basis[2];
     const float side = std::uniform_int_distribution<int>(0, 1)(m_rng) ? 1.0f : -1.0f;
     const float dist = Rand(m_rng, 15.0f, 19.0f), lateral = side * Rand(m_rng, 2.5f, 4.0f), lift = Rand(m_rng, -1.5f, 1.5f);
-    for (int i = 0; i < 3; ++i) m_pulsar.pos[i] = m_pos[i] + fwd[i] * dist + right[i] * lateral + up[i] * lift;
-    // Spin axis: tilted, so the beams sweep across the view rather than straight at the camera.
+    for (int i = 0; i < 3; ++i) m_pulsar.pos[i] = at ? at[i] : m_pos[i] + fwd[i] * dist + right[i] * lateral + up[i] * lift;
+    // Spin axis: roughly across the view, tilted ~25 degrees towards us, so the beams sweep a
+    // wide ellipse on screen and pass close enough to the camera to flare as they cross it.
     float axis[3] = { Rand(m_rng, -1, 1), Rand(m_rng, -1, 1), Rand(m_rng, -1, 1) };
+    Normalize3(axis);
+    const float along = axis[0] * fwd[0] + axis[1] * fwd[1] + axis[2] * fwd[2];
+    for (int i = 0; i < 3; ++i) axis[i] -= fwd[i] * along;
+    Normalize3(axis);
+    for (int i = 0; i < 3; ++i) axis[i] += fwd[i] * 0.45f * side;
     Normalize3(axis);
     float u[3] = { axis[1] * fwd[2] - axis[2] * fwd[1], axis[2] * fwd[0] - axis[0] * fwd[2], axis[0] * fwd[1] - axis[1] * fwd[0] };
     Normalize3(u);
@@ -316,7 +324,9 @@ void NebulaVisualizer::SpawnPulsar() {
     memcpy(m_pulsar.axisU, u, sizeof(u));
     memcpy(m_pulsar.axisV, v, sizeof(v));
     m_pulsar.active = true;
+    m_pulsar.fromNova = at != nullptr;
     m_pulsar.age = 0.0f;
+    m_pulsar.swell = 0.0f;
 }
 
 void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
@@ -362,11 +372,19 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
         m_manualCharge = -1.0f;
         m_nova.active = true;
         m_nova.age = 0.0f;
+        m_novaPulsarDone = false;
         if (!m_locked && m_timeSinceChange > 4.0f) NextLook(1.5f);
     }
     m_dropFlash *= std::exp(-dt / 0.8f);
     m_hyper *= std::exp(-dt / 1.6f);
     if (m_nova.active && (m_nova.age += dt) > 14.0f) m_nova.active = false;
+    // A couple of seconds after the blast, what's left spins up into a pulsar, its beams
+    // wheeling around the flight as it rushes past.
+    if (m_nova.active && m_nova.age > 2.5f && !m_novaPulsarDone && !m_pulsar.active && !audio.silent) {
+        SpawnPulsar(m_nova.pos);
+        m_pulsar.fade = 0.0f;
+        m_novaPulsarDone = true;
+    }
 
     // Phrases: every 8 bars when the grid is locked (changing on the downbeat),
     // otherwise every 32 heard beats; and at least once a minute.
@@ -391,8 +409,23 @@ void NebulaVisualizer::Update(const AudioFeatures& audio, float dt) {
         const bool leaving = ahead < -4.0f || m_pulsar.age > 50.0f;   // once it's behind us
         m_pulsar.fade = std::clamp(m_pulsar.fade + dt * (leaving ? -0.6f : 0.5f), 0.0f, 1.0f);
         if (leaving && m_pulsar.fade <= 0.0f) m_pulsar.active = false;
-        if (gridLocked) m_pulsar.spin = 6.2831853f * 2.0f * audio.barPhase;
+        // Where the camera is around the spin axis: a beam points (as near as the tilt allows)
+        // at us when the spin reaches this angle.
+        float toCam[3] = { -rel[0], -rel[1], -rel[2] };
+        Normalize3(toCam);
+        const float* u = m_pulsar.axisU;
+        const float* v = m_pulsar.axisV;
+        const float camAngle = std::atan2(toCam[0] * v[0] + toCam[1] * v[1] + toCam[2] * v[2], toCam[0] * u[0] + toCam[1] * u[1] + toCam[2] * u[2]);
+        // Locked to the grid, the + beam crosses us on every downbeat.
+        if (gridLocked) m_pulsar.spin = 6.2831853f * 2.0f * audio.barPhase + camAngle;
         else m_pulsar.spin += dt * 6.2831853f * 0.7f;
+        // Lighthouse flash: a soft, eased swell as a beam crosses us, strongest on the downbeat
+        // (one big sweep per bar, not one per beat).
+        const float cs = std::cos(m_pulsar.spin), sn = std::sin(m_pulsar.spin);
+        const float beamToCam = std::fabs(toCam[0] * (u[0] * cs + v[0] * sn) + toCam[1] * (u[1] * cs + v[1] * sn) + toCam[2] * (u[2] * cs + v[2] * sn));
+        const float gate = gridLocked ? std::pow(1.0f - audio.barPhase, 3.0f) : 0.5f;
+        const float f = m_pulsar.fade * m_pulsar.fade * (3.0f - 2.0f * m_pulsar.fade);
+        m_pulsar.swell = Smooth(m_pulsar.swell, std::pow(beamToCam, 4.0f) * gate * f, dt, 0.06f, 0.4f);
     }
     m_lookBlend = std::min(1.0f, m_lookBlend + dt / m_lookBlendSeconds);
 
@@ -568,6 +601,10 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
         c.pulsarWidth = 0.22f;
         c.pulsarWake = f * 0.9f;
         c.pulsarStar = f * 1.6f;
+        // Magnetic swirl: the gas around it winds slowly into a spiral, with a glowing ring at its equator.
+        c.pulsarSwirl = f * std::min(m_pulsar.age * 0.12f, 2.2f);
+        c.pulsarRing = f * 0.8f;
+        post.pulsarSwell = m_pulsar.swell;
         // Lighthouse: the star flares as one of its beams swings across us.
         float toCam[3] = { -rel[0], -rel[1], -rel[2] };
         Normalize3(toCam);
@@ -604,8 +641,15 @@ void NebulaVisualizer::Render(Renderer& renderer, float time, float dt) {
         c.snPush = 3.0f * std::min(1.0f, a / 1.2f) * std::clamp((14.0f - a) / 5.0f, 0.0f, 1.0f);
         // What's left: a small, hard, blue-white star where it was.
         const float left = std::clamp((a - 1.0f) / 2.0f, 0.0f, 1.0f) * std::clamp((14.0f - a) / 4.0f, 0.0f, 1.0f);
-        c.snStar = 0.7f * left;
+        // Once it has spun up into a pulsar, that takes over.
+        c.snStar = 0.7f * left * (m_pulsar.active && m_pulsar.fromNova ? 1.0f - m_pulsar.fade : 1.0f);
         c.snStarSize = 0.006f;
+        // The shock reaching us: an eased moment of impact as the shell sweeps over the camera,
+        // and on screen the shell's edge racing outward from the blast until it fills the view.
+        const float dCam = std::sqrt(rel[0] * rel[0] + rel[1] * rel[1] + rel[2] * rel[2]);
+        const float gap = (c.snShellRadius - dCam) / 3.5f;
+        post.shockImpact = a < 4.0f ? std::exp(-gap * gap) : 0.0f;
+        post.shockRing = c.snShellRadius < dCam ? 0.5f * std::tan(std::asin(c.snShellRadius / dCam)) / c.tanHalfFov : 10.0f;
         const float shift = std::min(1.0f, a / 2.5f);   // white-hot, then the look's colours
         for (int i = 0; i < 3; ++i) {
             c.snPos[i] = c.camPos[i] + rel[i];
